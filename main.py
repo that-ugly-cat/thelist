@@ -61,6 +61,15 @@ log = logging.getLogger("thelist")
 # construction rather than by attention.
 PUBLIC_PATHS = ["/", "/health", "/static/*", "/login", "/logout", "/invite/*"]
 
+# Not public — these carry a per-user key — but they must not go through the
+# gate either: they talk to programs, and a redirect to a login page is the last
+# thing an MCP client can handle. In the Caddy block they sit in the same matcher
+# as the public paths, which is what makes `noforge` apply to them: that snippet
+# is where the X-Borant-* headers get stripped, and it lives only on the branches
+# that skip the gate. Borant ID paid for that lesson once already — on a public
+# path, a forged identity header went straight through.
+MACHINE_PATHS = ["/mcp", "/mcp/*"]
+
 from mcp_app import mcp  # noqa: E402
 
 
