@@ -4,7 +4,7 @@ A list of macro-tasks, owned by one person and annotated by the people they work
 with. One board per user; the owner decides what is on it, editors add notes,
 reorder, mark things done and propose new items.
 
-Live at [thelist.borant.eu](https://thelist.borant.eu).
+**Live at [thelist.borant.eu](https://thelist.borant.eu)**, behind Borant ID.
 
 **What it is not:** a task manager. No sub-tasks, no generated instances, no
 scheduler, no burndown. A row is a thing worth remembering exists, not a unit of

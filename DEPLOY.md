@@ -49,16 +49,45 @@ do it is noted in the wiki, not here.
 ## Turning the gate on
 
 1. Put the Caddy block in and reload.
-2. Set `AUTH_MODE=gateway` and `BORANT_TRUSTED_PROXY` in `.env`.
-3. `docker compose up -d`.
+2. **Register the app in Borant ID** — this is the step that is easy to miss,
+   because nothing fails loudly without it: the gate will still redirect, but
+   there is no `App` row to hang a grant on, so nobody can be let in. Add a line
+   to `PERIMETER` in `borant-id/seed.py`, deploy that, and run
+   `docker exec borantid python seed.py --apps` (idempotent — it only adds what
+   is missing). TheList declares **no roles**: the role here is per-board and
+   lives in `memberships`, and the app reads no hint header.
+3. Grant access to the people who need it, from Borant ID's `/admin`. **A new
+   account arrives with zero grants**: without one, a legitimate person meets a
+   closed door and it looks like a bug.
+4. Set `AUTH_MODE=gateway` and `BORANT_TRUSTED_PROXY` in `.env`.
+5. `docker compose up -d`.
 
 **`BORANT_TRUSTED_PROXY` is the bridge gateway, not `127.0.0.1`.** Under Docker
 the proxy connects from the bridge, so read the real value off the running
 container rather than assuming:
 
 ```bash
-docker exec thelist sh -c "ip route | awk '/default/ {print \$3}'"
+docker inspect thelist --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'
 ```
+
+Two things learned doing this for real on 27 Aug 2026, both of which make the
+obvious command the wrong one:
+
+- **`ip route` inside the container does not work**: `python:3.12-slim` has no
+  `iproute2`, and the failure is silent — an empty answer that looks like an
+  answer. `docker inspect` asks the daemon instead of the container and cannot
+  fail that way.
+- **The value is per-app, not per-host.** Every compose project gets its own
+  network: the other apps on this box sit on `172.21.0.1`, `192.168.48.1`,
+  `192.168.96.1` and so on, and TheList landed on `192.168.192.1`. Copying a
+  neighbour's value gives an app that refuses every identity header and answers
+  503 with a message about the gate not being in front of it.
+
+Corollary worth knowing before it bites: recreating the compose network (a
+`docker compose down` followed by `up`, not a plain `up -d`) can hand the
+project a different subnet, and the stale value in `.env` then rejects
+everything. If the app starts answering 503 after a restart, read the gateway
+again.
 
 In gateway mode identity headers are believed **only** from that address. They
 are ignored everywhere else, with a warning in the log.
