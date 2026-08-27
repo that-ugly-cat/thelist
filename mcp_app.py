@@ -1,41 +1,57 @@
 """
-The model-facing surface of TheList. **Read-only in Fase 1.**
+The model-facing surface of TheList.
 
-The question this exists for is the one that arrives in conversation rather than
-in front of a page: what is due, what is waiting for me to decide, and how much
-of this quarter went to somebody else's work.
+The questions this exists for are the ones that arrive in conversation rather
+than in front of a page: what is due, what is waiting for me to decide, how much
+of this quarter went to somebody else's work — and, since the surface writes too,
+"put that on my list" said while talking about the thing itself.
 
 Access. Every call runs as the human who owns the API key, and every board
 lookup goes through the same access function the web app uses. The surface has
-exactly the reach of its owner, no more. A board the caller is not a member of
-answers "not found" and never "forbidden", or the model could enumerate what it
-cannot read.
+exactly the reach of its owner, no more. **The distinction that governs the
+refusals**: a board the caller is not a member of answers "not found", because
+otherwise the model could enumerate what it cannot read; but a board they CAN
+see, with an action reserved to the owner, says so plainly — nothing is being
+hidden there, and a model that knows the rule can explain it instead of
+retrying.
+
+The write tools enforce exactly the rules the web enforces, and they do it by
+calling the same functions rather than by repeating them: an editor proposes
+where the owner creates, declining needs a reason, deletion is soft, completing a
+recurring task keeps it on the list. There is no path through here that the
+interface would not allow.
 
 Errors are returned as {"error": ...} rather than raised: a tool that throws
 gives the model a stack trace to hallucinate around, while a message it can read
 lets it correct course.
-
-Writing is deliberately not here. `add_note` would be the natural one, and it is
-postponed: the first version gets looked at before it gets written to.
 """
 from datetime import date, datetime, timedelta
 
 from mcp.server.mcpserver import MCPServer
 
 import auth
+import mailer
 from models import (
-    EFFORT_WEIGHTS, STATUS_LABELS, Note, SessionLocal, Task, User, Workspace,
-    active_tasks, people_of, report, role_for, tags_of, utcnow, workspaces_of,
+    DEFAULT_EFFORT, EFFORTS, EFFORT_WEIGHTS, STATUS_LABELS, Membership, Note,
+    SessionLocal, Task, User, Workspace, active_tasks, get_or_create_person,
+    has_role, log_event, mark_done, next_position, people_of,
+    person_for_proposal, reopen, report, role_for, self_person, set_tags,
+    tags_of, utcnow, workspaces_of,
 )
 
 mcp = MCPServer(
     name="thelist",
     instructions=(
         "A list of macro-tasks, one board per person: what is on it, what is due, "
-        "what is waiting for a decision, and who the work is for. Read-only — every "
-        "change is made by a human in the web app. Start with list_boards. "
-        "Note that `workload` counts tasks and completions, NOT time: report those "
-        "numbers as frequency and volume, never as hours."
+        "what is waiting for a decision, and who the work is for. Start with "
+        "list_boards. Reads are free; **before writing anything — adding a task, "
+        "noting, completing, accepting, declining, deleting — confirm with the user**, "
+        "because this list is how two people coordinate and a surprise entry costs "
+        "somebody a conversation. "
+        "Two things to carry into every answer: `workload` counts tasks and "
+        "completions, NOT time, so report those numbers as frequency and volume and "
+        "never as hours; and the order of a board is the priority its owner declared "
+        "by hand, so do not re-sort it before showing it."
     ),
 )
 
@@ -63,6 +79,57 @@ def _board(db, user, ref: str):
         if str(ws.id) == ref or ws.name.lower() == ref.lower():
             return ws
     return None
+
+
+def _no_board(db, user, ref: str) -> dict:
+    """Why there is no board here — and there are two different reasons for it.
+
+    Naming a board that is not yours has to look exactly like naming one that
+    does not exist, or the surface becomes a way to probe for what it hides. But
+    saying the same thing to somebody who can see several boards and named none
+    is not discretion, it is unhelpfulness: **an editor always has two**, their
+    own and the one they were invited to, so the empty default is ambiguous
+    rather than missing. Listing what they can already see gives nothing away.
+    """
+    boards = workspaces_of(db, user)
+    if not (ref or "").strip() and len(boards) > 1:
+        return _fail("you can reach more than one board, so say which: "
+                     + ", ".join("%s (id %d)" % (ws.name, ws.id) for ws in boards))
+    return _fail("board not found")
+
+
+def _open(db, ref: str, minimum: str = "editor"):
+    """(workspace, user, None) on success, (None, None, error) on refusal.
+
+    The third slot is an error and nothing else. It held the resolved role for
+    about ten minutes, which meant every caller's `if err: return err` fired on
+    success and answered "owner" to whoever asked — invisible to the read tools,
+    which never call this, and caught by the first write test.
+
+    The two refusals are not the same refusal, and the difference is deliberate.
+    A board that is not yours does not exist — anything else lets the model probe
+    for what it cannot see. A board that IS yours, with an action reserved to the
+    owner, says exactly that: nothing is concealed by the answer, and a model
+    that is told the rule can pass it on instead of retrying.
+    """
+    user = _caller(db)
+    if user is None:
+        return None, None, _fail("unknown caller")
+    ws = _board(db, user, ref)
+    if ws is None:
+        return None, None, _no_board(db, user, ref)
+    role = role_for(db, ws.id, user)
+    if not has_role(role, minimum):
+        return None, None, _fail("only the owner of this board can do that")
+    return ws, user, None
+
+
+def _task(db, ws, task_id: int, deleted: bool = False):
+    t = (db.query(Task)
+           .filter(Task.id == task_id, Task.workspace_id == ws.id).first())
+    if t is None or (t.deleted_at is not None) != deleted:
+        return None
+    return t
 
 
 def _brief(db, t: Task) -> dict:
@@ -117,7 +184,7 @@ def list_tasks(board: str = "", status: str = "active", tag: str = "",
             return _fail("unknown caller")
         ws = _board(db, user, board)
         if ws is None:
-            return _fail("board not found")
+            return _no_board(db, user, board)
         if status not in STATUS_LABELS:
             return _fail(f"status must be one of {', '.join(STATUS_LABELS)}")
 
@@ -148,7 +215,7 @@ def get_task(task_id: int, board: str = "") -> dict:
             return _fail("unknown caller")
         ws = _board(db, user, board)
         if ws is None:
-            return _fail("board not found")
+            return _no_board(db, user, board)
         t = db.query(Task).filter(Task.id == task_id,
                                   Task.workspace_id == ws.id).first()
         if t is None:
@@ -176,7 +243,7 @@ def upcoming(days: int = 14, board: str = "") -> dict:
             return _fail("unknown caller")
         ws = _board(db, user, board)
         if ws is None:
-            return _fail("board not found")
+            return _no_board(db, user, board)
         horizon = date.today() + timedelta(days=max(0, days))
         rows = [t for t in active_tasks(db, ws).all()
                 if t.due_date and t.due_date <= horizon]
@@ -197,7 +264,7 @@ def list_proposals(board: str = "") -> dict:
             return _fail("unknown caller")
         ws = _board(db, user, board)
         if ws is None:
-            return _fail("board not found")
+            return _no_board(db, user, board)
         q = db.query(Task).filter(Task.workspace_id == ws.id, Task.deleted_at.is_(None))
         pending = q.filter(Task.status == "proposed").order_by(Task.created_at).all()
         declined = (q.filter(Task.status == "rejected")
@@ -236,7 +303,7 @@ def workload(date_from: str = "", date_to: str = "", board: str = "",
             return _fail("unknown caller")
         ws = _board(db, user, board)
         if ws is None:
-            return _fail("board not found")
+            return _no_board(db, user, board)
         if group_by not in ("person", "tag"):
             return _fail('group_by must be "person" or "tag"')
 
@@ -274,7 +341,7 @@ def vocabularies(board: str = "") -> dict:
             return _fail("unknown caller")
         ws = _board(db, user, board)
         if ws is None:
-            return _fail("board not found")
+            return _no_board(db, user, board)
         return {
             "board": ws.name,
             "tags": [t.display_name for t in tags_of(db, ws)],
@@ -282,5 +349,409 @@ def vocabularies(board: str = "") -> dict:
                        for p in people_of(db, ws)],
             "efforts": EFFORT_WEIGHTS,
         }
+    finally:
+        db.close()
+
+
+# ── writing ───────────────────────────────────────────────────────────────────
+#
+# Everything below goes through the same helpers the web routes use — mark_done,
+# reopen, set_tags, get_or_create_person, log_event — rather than reimplementing
+# the rules beside them. Two implementations of "what does completing a recurring
+# task mean" is one too many, and the second one is always the one that drifts.
+#
+# Every write also carries via="mcp" into the event log, so the history can tell
+# a change made in conversation from one made on the page.
+
+
+@mcp.tool()
+def add_task(title: str, board: str = "", for_person: str = "", tags: str = "",
+             effort: str = "M", due: str = "", recurring: bool = False,
+             description: str = "", link_url: str = "", link_label: str = "",
+             allow_duplicate: bool = False) -> dict:
+    """Put something on a board — or propose it, depending on who you are.
+
+    The owner's tasks land on the list; an editor's land as a proposal for the
+    owner to accept or decline. Same rule as the interface, and the answer says
+    which of the two happened.
+
+    `for_person` is who the task is FOR — anyone, with or without an account; an
+    unknown name creates that person on this board. Left empty it defaults to the
+    owner ("Me"), or to the proposer when an editor proposes.
+
+    `effort` is S, M or L (declared size, never hours). `due` is ISO YYYY-MM-DD.
+    `recurring` means it comes back every so often: completing it will keep it on
+    the list and record when it was last done, instead of archiving it.
+
+    A title that already exists on the board is refused unless `allow_duplicate`
+    is set — a retried call should not quietly leave two identical rows.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "editor")
+        if err:
+            return err
+        title = (title or "").strip()
+        if not title:
+            return _fail("a task needs a title")
+        effort = (effort or DEFAULT_EFFORT).upper()
+        if effort not in EFFORTS:
+            return _fail("effort must be one of " + ", ".join(EFFORTS))
+        due_date = None
+        if due:
+            try:
+                due_date = date.fromisoformat(due)
+            except ValueError:
+                return _fail("due must be ISO, YYYY-MM-DD")
+
+        if not allow_duplicate:
+            clash = (db.query(Task)
+                       .filter(Task.workspace_id == ws.id,
+                               Task.deleted_at.is_(None),
+                               Task.status.in_(("active", "proposed")),
+                               Task.title == title).first())
+            if clash is not None:
+                return _fail(
+                    "task %d on this board already has that exact title (%s). Pass "
+                    "allow_duplicate to add a second one anyway."
+                    % (clash.id, clash.status))
+
+        is_owner = role_for(db, ws.id, user) == "owner"
+        t = Task(workspace_id=ws.id, title=title,
+                 description=(description or "").strip(),
+                 status="active" if is_owner else "proposed",
+                 recurring=bool(recurring), effort=effort, due_date=due_date,
+                 link_url=(link_url or "").strip(),
+                 link_label=(link_label or "").strip(),
+                 created_by=user.id,
+                 position=next_position(db, ws) if is_owner else 0)
+        if for_person.strip():
+            p = get_or_create_person(db, ws, for_person)
+            t.for_person_id = p.id if p else None
+        if t.for_person_id is None:
+            t.for_person_id = (self_person(db, ws).id if is_owner
+                               else person_for_proposal(db, ws, user).id)
+        db.add(t)
+        db.flush()
+        set_tags(db, ws, t, tags)
+        log_event(db, ws.id, "created" if is_owner else "proposed",
+                  actor=user, task=t, title=t.title, via="mcp")
+
+        if not is_owner:
+            owner = db.query(User).get(ws.owner_user_id)
+            subject, body = mailer.proposal_received(user.label, t.title, ws.id)
+            mailer.notify(db, owner, "proposal_received", subject, body)
+        db.commit()
+        return {"landed": "on the list" if is_owner else "in the owner's proposals",
+                "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def update_task(task_id: int, board: str = "", title: str = "",
+                for_person: str = "", tags: str = "", effort: str = "",
+                due: str = "", description: str = "", link_url: str = "",
+                recurring: str = "", clear: str = "") -> dict:
+    """Change a task. Owner only.
+
+    Empty means "leave it alone", so a call only touches what it names. To empty
+    a field, list it in `clear` instead — a comma-separated set drawn from
+    due, description, tags, link, for.
+
+    `recurring` takes "yes" or "no". `tags` REPLACES the whole set rather than
+    adding to it: read the task first if you mean to append.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+
+        wipe = {c.strip().lower() for c in (clear or "").replace(";", ",").split(",")}
+        before_person = t.for_person_id
+
+        if title.strip():
+            t.title = title.strip()
+        if description.strip():
+            t.description = description.strip()
+        elif "description" in wipe:
+            t.description = ""
+        if effort.strip():
+            e = effort.strip().upper()
+            if e not in EFFORTS:
+                return _fail("effort must be one of " + ", ".join(EFFORTS))
+            t.effort = e
+        if recurring.strip():
+            r = recurring.strip().lower()
+            if r not in ("yes", "no", "true", "false"):
+                return _fail('recurring takes "yes" or "no"')
+            t.recurring = r in ("yes", "true")
+        if due.strip():
+            try:
+                t.due_date = date.fromisoformat(due.strip())
+            except ValueError:
+                return _fail("due must be ISO, YYYY-MM-DD")
+        elif "due" in wipe:
+            t.due_date = None
+        if link_url.strip():
+            t.link_url = link_url.strip()
+        elif "link" in wipe:
+            t.link_url, t.link_label = "", ""
+        if for_person.strip():
+            p = get_or_create_person(db, ws, for_person)
+            if p is not None:
+                t.for_person_id = p.id
+        elif "for" in wipe:
+            t.for_person_id = self_person(db, ws).id
+        if tags.strip():
+            set_tags(db, ws, t, tags)
+        elif "tags" in wipe:
+            set_tags(db, ws, t, "")
+
+        log_event(db, ws.id, "edited", actor=user, task=t, via="mcp")
+        if before_person != t.for_person_id:
+            log_event(db, ws.id, "for_changed", actor=user, task=t,
+                      before=before_person, after=t.for_person_id, via="mcp")
+        db.commit()
+        return {"updated": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def complete_task(task_id: int, board: str = "") -> dict:
+    """Record that a task has been done. Either role may.
+
+    On a one-off task this archives it. On a recurring one it stays exactly where
+    it is, records the date and drops its due date — so the answer says which of
+    the two happened instead of leaving you to assume.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "editor")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        if t.status != "active":
+            return _fail("that task is %s, and only something on the list can be "
+                         "completed" % t.status)
+        was_recurring = t.recurring
+        mark_done(db, ws, t, actor=user)
+        db.commit()
+        return {"outcome": ("recorded, and it stays on the list" if was_recurring
+                            else "archived"),
+                "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def reopen_task(task_id: int, board: str = "") -> dict:
+    """Put an archived task back on the list, at the bottom. Either role may."""
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "editor")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        if t.status == "active":
+            return _fail("that task is already on the list")
+        reopen(db, ws, t, actor=user)
+        db.commit()
+        return {"reopened": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def add_note(task_id: int, body: str, board: str = "") -> dict:
+    """Write a note on a task. Either role may.
+
+    Notes cannot be edited afterwards — they are how two people talk to each
+    other here, and an editable one is a conversation nobody can rely on. Write
+    something you are willing to leave standing.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "editor")
+        if err:
+            return err
+        body = (body or "").strip()
+        if not body:
+            return _fail("an empty note is not a note")
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        db.add(Note(task_id=t.id, author_user_id=user.id, body=body))
+        log_event(db, ws.id, "note_added", actor=user, task=t, via="mcp")
+        for m in db.query(Membership).filter(Membership.workspace_id == ws.id).all():
+            if m.user_id != user.id:
+                mailer.notify(db, m.user, "note_added", "Note on: " + t.title,
+                              '%s wrote on "%s":\n\n%s\n\n  %s/app/%d\n'
+                              % (user.label, t.title, body, mailer.base_url(), ws.id))
+        db.commit()
+        return {"added": True, "task_id": t.id, "author": user.label}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def accept_proposal(task_id: int, board: str = "") -> dict:
+    """Accept a proposal onto the list, at the bottom. Owner only."""
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        if t.status != "proposed":
+            return _fail("that is not an open proposal")
+        t.status = "active"
+        t.position = next_position(db, ws)
+        t.decided_by, t.decided_at = user.id, utcnow()
+        log_event(db, ws.id, "accepted", actor=user, task=t, via="mcp")
+        proposer = db.query(User).get(t.created_by) if t.created_by else None
+        if proposer is not None and proposer.id != user.id:
+            subject, body = mailer.proposal_accepted(user.label, t.title, ws.id)
+            mailer.notify(db, proposer, "proposal_decided", subject, body)
+        db.commit()
+        return {"accepted": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def decline_proposal(task_id: int, reason: str, board: str = "") -> dict:
+    """Decline a proposal. Owner only, and the reason is required.
+
+    Declined proposals are kept, with the reason: in a two-person arrangement
+    "you proposed this in May and I said no because…" is working memory, and a
+    refusal with no reason comes back identical in two months. Do not invent the
+    reason — ask the person for it.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        reason = (reason or "").strip()
+        if not reason:
+            return _fail("declining needs a reason, and it is kept with the proposal")
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        if t.status != "proposed":
+            return _fail("that is not an open proposal")
+        t.status = "rejected"
+        t.decision_reason = reason
+        t.decided_by, t.decided_at = user.id, utcnow()
+        log_event(db, ws.id, "rejected", actor=user, task=t, reason=reason, via="mcp")
+        proposer = db.query(User).get(t.created_by) if t.created_by else None
+        if proposer is not None and proposer.id != user.id:
+            subject, body = mailer.proposal_declined(user.label, t.title, reason, ws.id)
+            mailer.notify(db, proposer, "proposal_decided", subject, body)
+        db.commit()
+        return {"declined": True, "reason": reason, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def move_task(task_id: int, board: str = "", after_task_id: int = 0,
+              to_top: bool = False) -> dict:
+    """Move a task within the list. Either role may.
+
+    `to_top` puts it first; `after_task_id` puts it straight after that task;
+    neither puts it last.
+
+    The order of this list is a priority its owner declared by hand, so moving
+    something rewrites somebody else's stated priorities: confirm first. The move
+    is recorded either way.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "editor")
+        if err:
+            return err
+        rows = active_tasks(db, ws).all()
+        ids = [t.id for t in rows]
+        if task_id not in ids:
+            return _fail("task not found on the list")
+        if after_task_id and after_task_id not in ids:
+            return _fail("after_task_id is not on this list")
+        if after_task_id == task_id:
+            return _fail("a task cannot go after itself")
+
+        ids.remove(task_id)
+        if to_top:
+            ids.insert(0, task_id)
+        elif after_task_id:
+            ids.insert(ids.index(after_task_id) + 1, task_id)
+        else:
+            ids.append(task_id)
+
+        by_id = {t.id: t for t in rows}
+        for i, tid in enumerate(ids, start=1):
+            by_id[tid].position = i
+        ws.order_version += 1
+        log_event(db, ws.id, "reordered", actor=user, count=len(ids), via="mcp")
+        db.commit()
+        return {"moved": True,
+                "order": [{"id": tid, "title": by_id[tid].title} for tid in ids]}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def delete_task(task_id: int, board: str = "") -> dict:
+    """Take a task off the board. Owner only.
+
+    Deletion is soft, always: a task carries its notes, which are a conversation
+    between two people, and removing the row would remove somebody else's
+    history. It goes to the archive, and `restore_task` brings it back.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        t.deleted_at = utcnow()
+        log_event(db, ws.id, "deleted", actor=user, task=t, title=t.title, via="mcp")
+        db.commit()
+        return {"deleted": True, "recoverable": True, "task_id": t.id}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def restore_task(task_id: int, board: str = "") -> dict:
+    """Bring a deleted task back from the archive. Owner only."""
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        t = _task(db, ws, task_id, deleted=True)
+        if t is None:
+            return _fail("no deleted task with that id")
+        t.deleted_at = None
+        if t.status == "active":
+            t.position = next_position(db, ws)
+        log_event(db, ws.id, "restored", actor=user, task=t, via="mcp")
+        db.commit()
+        return {"restored": True, "task": _brief(db, t)}
     finally:
         db.close()

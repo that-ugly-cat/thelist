@@ -61,7 +61,7 @@ CSV export is on the same page.
 cp .env.example .env      # JWT_SECRET is required
 python seed.py            # first account, local mode only
 python dev-run.py         # http://localhost:8020
-python smoke.py           # 41 checks, its own database
+python smoke.py           # 79 checks, its own database
 ```
 
 `AUTH_MODE=local` (the default) uses email and password. `AUTH_MODE=gateway`
@@ -70,18 +70,37 @@ either way: the gate is a mode, never a dependency.
 
 ## The MCP surface
 
-Read-only. `list_boards`, `list_tasks`, `get_task`, `upcoming`,
-`list_proposals`, `workload`, `vocabularies`. Keys are created per user in
-Settings and carry an identity, not a capability: a call reaches exactly what its
-owner reaches, and what it cannot see answers "not found" rather than
-"forbidden".
+Seventeen tools, reading and writing, so the list can be kept from inside the
+conversation where the work is actually being discussed.
+
+**Reading** — `list_boards`, `list_tasks`, `get_task`, `upcoming`,
+`list_proposals`, `workload`, `vocabularies`.
+
+**Writing** — `add_task`, `update_task`, `complete_task`, `reopen_task`,
+`add_note`, `accept_proposal`, `decline_proposal`, `move_task`, `delete_task`,
+`restore_task`.
+
+Keys are created per user in Settings and carry an **identity, not a
+capability**: a call reaches exactly what its owner reaches. A board the caller
+is not a member of answers "not found" rather than "forbidden", or the surface
+becomes a way to probe for what it hides — but a board they *can* see with an
+owner-only action says so plainly, because nothing is concealed by that answer.
+
+The write tools call the same functions the web routes call rather than
+reimplementing the rules beside them, so there is **no path through here that the
+interface would not allow**: an editor proposes where the owner creates,
+declining needs a reason, deletion is soft, completing a recurring task keeps it
+on the list. `add_task` also refuses a title already on the board unless you pass
+`allow_duplicate` — a retried call should not quietly leave two identical rows.
 
 ```
 https://thelist.borant.eu/mcp            header: X-API-Key
 https://thelist.borant.eu/mcp/k/{key}    for clients that cannot set headers
 ```
 
-Writing is deliberately absent for now.
+Renaming and archiving people, invitations, mail preferences and keys stay out of
+the surface on purpose: renaming a person rewrites how the whole past reads, and
+that is a thing to do while looking at the page.
 
 ## Mail
 

@@ -240,6 +240,132 @@ def main_() -> int:
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
 
+    # ── the MCP surface, called as its owner ──────────────────────────────────
+    #
+    # Called in-process with the caller set by hand, which is exactly what the
+    # key gate does at the edge. The point of these checks is that the write
+    # tools cannot reach anywhere the interface would not: same roles, same
+    # rules, same soft delete.
+    import auth
+    import mcp_app as M
+
+    db = SessionLocal()
+    owner = db.query(User).filter(User.email == "owner@example.org").first()
+    editor = db.query(User).filter(User.email == "editor@example.org").first()
+    stranger = db.query(User).filter(User.email == "stranger@example.org").first()
+    db.close()
+
+    def as_(u):
+        auth.set_caller(u)
+
+    print("\n— MCP: what a board is —")
+    as_(owner)
+    boards = M.list_boards()["boards"]
+    check("the owner sees one board", len(boards) == 1 and boards[0]["role"] == "owner")
+    as_(stranger)
+    check("a stranger cannot reach it by id",
+          M.list_tasks(board=str(ws_id)).get("error") == "board not found")
+    check("...nor by name",
+          M.add_task(title="sneak", board="Spit's list").get("error") == "board not found")
+
+    as_(editor)
+    r = M.add_task(title="which board?")
+    check("an editor with two boards is asked which, not told 'not found'",
+          "more than one board" in r.get("error", ""), str(r))
+    check("...and the answer names them", "Spit's list" in r.get("error", ""))
+
+    print("\n— MCP: adding —")
+    as_(owner)
+    r = M.add_task(title="Read the BAG draft", for_person="Markus", tags="BAG",
+                   effort="L", due="2026-09-30")
+    check("the owner's task lands on the list", r.get("landed") == "on the list")
+    check("...for the person named", r["task"]["for"] == "Markus")
+    check("...with the tag and size given",
+          r["task"]["tags"] == ["BAG"] and r["task"]["effort"] == "L")
+    mcp_task = r["task"]["id"]
+    r2 = M.add_task(title="Read the BAG draft")
+    check("the same title twice is refused", "already has that exact title" in r2.get("error", ""))
+    r3 = M.add_task(title="Read the BAG draft", allow_duplicate=True)
+    check("...unless you say so", r3.get("landed") == "on the list")
+    M.delete_task(task_id=r3["task"]["id"])
+
+    r = M.add_task(title="bad size", effort="XL")
+    check("a size outside S/M/L is refused", "effort must be" in r.get("error", ""))
+    r = M.add_task(title="bad date", due="30/09/2026")
+    check("a non-ISO date is refused", "ISO" in r.get("error", ""))
+
+    as_(editor)
+    r = M.add_task(title="Ask the ministry again", board=str(ws_id))
+    check("an editor's task lands as a proposal",
+          r.get("landed") == "in the owner's proposals")
+    check("...for the proposer, deduced", r["task"]["for"] == "Nikola")
+    mcp_prop = r["task"]["id"]
+
+    print("\n— MCP: the roles hold —")
+    r = M.update_task(task_id=mcp_task, board=str(ws_id), title="hijacked")
+    check("an editor cannot edit", "only the owner" in r.get("error", ""))
+    r = M.delete_task(task_id=mcp_task, board=str(ws_id))
+    check("an editor cannot delete", "only the owner" in r.get("error", ""))
+    r = M.accept_proposal(task_id=mcp_prop, board=str(ws_id))
+    check("an editor cannot accept", "only the owner" in r.get("error", ""))
+    r = M.add_note(task_id=mcp_task, board=str(ws_id), body="looking at it now")
+    check("an editor can note", r.get("added") is True)
+    r = M.add_note(task_id=mcp_task, board=str(ws_id), body="   ")
+    check("an empty note is refused", "not a note" in r.get("error", ""))
+
+    print("\n— MCP: deciding —")
+    as_(owner)
+    r = M.decline_proposal(task_id=mcp_prop, reason="")
+    check("declining still needs a reason", "needs a reason" in r.get("error", ""))
+    r = M.decline_proposal(task_id=mcp_prop, reason="not this quarter")
+    check("...and keeps it with the reason",
+          r.get("declined") and r["reason"] == "not this quarter")
+    r = M.accept_proposal(task_id=mcp_prop, board=str(ws_id))
+    check("a decided proposal cannot then be accepted",
+          "not an open proposal" in r.get("error", ""))
+
+    print("\n— MCP: editing and clearing —")
+    r = M.update_task(task_id=mcp_task, recurring="yes", clear="due")
+    check("recurring can be turned on", r["task"]["recurring"] is True)
+    check("...and the due date cleared", r["task"]["due"] is None)
+    r = M.update_task(task_id=mcp_task, recurring="maybe")
+    check("recurring takes yes or no", "yes" in r.get("error", ""))
+    r = M.update_task(task_id=mcp_task, tags="BAG, DEH")
+    check("tags replace the whole set", sorted(r["task"]["tags"]) == ["BAG", "DEH"])
+
+    print("\n— MCP: completing means two different things —")
+    r = M.complete_task(task_id=mcp_task)
+    check("a recurring task stays on the list",
+          r["outcome"].startswith("recorded") and r["task"]["status"] == "active")
+    check("...and its date is recorded", r["task"]["last_done"] is not None)
+    r = M.add_task(title="A one-off from the chat", effort="S")
+    one = r["task"]["id"]
+    r = M.complete_task(task_id=one)
+    check("a one-off is archived", r["outcome"] == "archived")
+    r = M.complete_task(task_id=one)
+    check("...and cannot be completed twice", "only something on the list" in r.get("error", ""))
+    r = M.reopen_task(task_id=one)
+    check("reopening puts it back", r["task"]["status"] == "active")
+
+    print("\n— MCP: moving —")
+    r = M.move_task(task_id=one, to_top=True)
+    check("to_top puts it first", r["order"][0]["id"] == one)
+    r = M.move_task(task_id=one, after_task_id=one)
+    check("a task cannot go after itself", "after itself" in r.get("error", ""))
+    r = M.move_task(task_id=one, after_task_id=999999)
+    check("an unknown anchor is refused", "not on this list" in r.get("error", ""))
+    r = M.move_task(task_id=one)
+    check("with no anchor it goes last", r["order"][-1]["id"] == one)
+
+    print("\n— MCP: deletion stays soft —")
+    r = M.delete_task(task_id=one)
+    check("delete says it is recoverable", r.get("recoverable") is True)
+    check("...and it is gone from the list",
+          one not in [t["id"] for t in M.list_tasks()["tasks"]])
+    r = M.restore_task(task_id=one)
+    check("restore brings it back", r["task"]["status"] == "active")
+    as_(None)
+
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:
         print("failing: " + ", ".join(FAILED))
