@@ -417,6 +417,30 @@ def bootstrap_admin(db, user) -> bool:
     return True
 
 
+def ensure_one_admin(db) -> str | None:
+    """If nobody can administer, give it to the oldest active account.
+
+    Runs at startup, and exists because `bootstrap_admin` alone got it wrong the
+    first time it met a database that already had people in it. On 27 Aug 2026
+    the admin level shipped to an app with two accounts already created: the rule
+    "first account with no admin around" then handed the level to **the next
+    person to arrive** rather than to the one who had been there since the
+    morning. The intention was always "whoever was here first"; with existing
+    rows, only this reading of it is true.
+
+    Returns the email it promoted, or None if somebody could already do the job.
+    """
+    if db.query(User).filter(User.is_admin == True,  # noqa: E712
+                             User.is_active == True).first() is not None:  # noqa: E712
+        return None
+    first = (db.query(User).filter(User.is_active == True)  # noqa: E712
+               .order_by(User.created_at, User.id).first())
+    if first is None:
+        return None
+    first.is_admin = True
+    return first.email
+
+
 def ensure_workspace(db, user) -> Workspace:
     """Every user owns exactly one board, created on first sight.
 

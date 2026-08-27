@@ -43,7 +43,8 @@ from models import (
     NOTIFICATION_LABELS, ROLE_LABELS, STATUS_LABELS,
     ApiKey, Event, Invitation, Membership, Note, NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
-    active_tasks, apply_order, ensure_workspace, get_or_create_person, get_db,
+    active_tasks, apply_order, ensure_one_admin, ensure_workspace,
+    get_or_create_person, get_db,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
     normalise, people_of, person_for_proposal, reopen, report, role_for,
     self_person, set_tags, tags_of, utcnow, workspaces_of,
@@ -109,6 +110,18 @@ async def _due_digest_loop():
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Never leave the app with nobody who can configure it — including the case
+    # this got wrong once: an admin level arriving in a database that already has
+    # accounts. See models.ensure_one_admin.
+    db = SessionLocal()
+    try:
+        promoted = ensure_one_admin(db)
+        if promoted:
+            db.commit()
+            log.warning("no administrator existed: promoted %s, the oldest account. "
+                        "Change it with admin.py --promote / --demote.", promoted)
+    finally:
+        db.close()
     task = asyncio.create_task(_due_digest_loop())
     # The MCP session manager runs inside the parent app's lifespan: mounts do
     # not propagate lifespans, and without the transport the surface answers 500

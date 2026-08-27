@@ -246,12 +246,25 @@ def main_() -> int:
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
 
-        print("\n— administration is a different axis, not a level above —")
+        print("\n— somebody can always administer —")
+        # The case this got wrong in production: an admin level arriving in a
+        # database that already has accounts. "First account with no admin
+        # around" hands the level to the NEXT arrival; only "the oldest account"
+        # means what was intended.
+        from models import ensure_one_admin
         db = SessionLocal()
-        o = db.query(User).filter(User.email == "owner@example.org").first()
-        o.is_admin = True
+        for u in db.query(User).all():
+            u.is_admin = False
         db.commit()
+        promoted = ensure_one_admin(db)
+        db.commit()
+        check("with no admin at all, the oldest account gets it",
+              promoted == "owner@example.org", str(promoted))
+        check("...and running it again changes nothing",
+              ensure_one_admin(db) is None)
         db.close()
+
+        print("\n— administration is a different axis, not a level above —")
         r = E.get("/admin", follow_redirects=False)
         check("a member cannot even see /admin", r.status_code == 404, str(r.status_code))
         r = O.get("/admin")
