@@ -246,6 +246,52 @@ def main_() -> int:
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
 
+        print("\n— invitations: public to read, gated to accept —")
+        # The 503 in production came from here: the accepting half needed an
+        # identity while sitting on a path declared public, where the gate never
+        # runs and the identity headers are stripped.
+        r = O.post(f"/app/{ws_id}/members", data={"email": "newcomer@example.org"},
+                   follow_redirects=False)
+        tok = r.headers["location"].split("invited=")[1].split("&")[0]
+        check("inviting produces a token", len(tok) > 10)
+        r = c.get(f"/invite/{tok}")
+        check("the invitation page is readable by anyone", r.status_code == 200)
+        check("...and points at the gated side", f"/app/join/{tok}" in r.text)
+        check("nothing on a public path needs an identity",
+              all(not p.startswith("/invite") for p in
+                  [r_.path for r_ in main.app.routes
+                   if getattr(r_, "methods", None) and "POST" in r_.methods]))
+        r = c.get(f"/app/join/{tok}", follow_redirects=False)
+        check("the accepting side is gated", r.status_code in (302, 401),
+              str(r.status_code))
+
+        newcomer = User(email="newcomer@example.org", name="New",
+                        hashed_password=hash_password("pw"), is_active=True)
+        db = SessionLocal()
+        db.add(newcomer)
+        db.commit()
+        db.close()
+        N = login("newcomer@example.org")
+        r = N.get(f"/app/join/{tok}")
+        check("the invited person sees a confirmation", r.status_code == 200)
+        # Somebody who is NOT already a member: an existing member sees the
+        # "you are already on this list" branch first, which is right — once you
+        # are in, who the invitation was addressed to stops mattering.
+        r = S.get(f"/app/join/{tok}")
+        check("somebody else sees who it was addressed to",
+              "newcomer@example.org" in r.text and "sent to" in r.text)
+        r = S.post(f"/app/join/{tok}", follow_redirects=False)
+        check("...and cannot take it", r.status_code == 400, str(r.status_code))
+        r = E.get(f"/app/join/{tok}")
+        check("an existing member is told they are already in",
+              "already on this list" in r.text)
+        r = N.post(f"/app/join/{tok}", follow_redirects=False)
+        check("the right person can", r.status_code == 302)
+        check("...and lands on the board",
+              r.headers["location"] == f"/app/{ws_id}")
+        r = N.post(f"/app/join/{tok}", follow_redirects=False)
+        check("an accepted invitation is spent", r.status_code == 404)
+
         print("\n— somebody can always administer —")
         # The case this got wrong in production: an admin level arriving in a
         # database that already has accounts. "First account with no admin

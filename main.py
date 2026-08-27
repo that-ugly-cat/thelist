@@ -59,9 +59,22 @@ log = logging.getLogger("thelist")
 # the reverse-proxy block by reading this list rather than by remembering it.
 #
 # The trap worth naming (it cost ArguMap a real incident): check that no private
-# route is a LONGER PREFIX of a public one. Here every private route lives under
-# /app, and nothing public starts with /app, so the property holds by
-# construction rather than by attention.
+# route is a LONGER PREFIX of a public one. Every private route lives under /app
+# and nothing public starts with /app, so the property holds by construction
+# rather than by attention.
+#
+# **That property was worth exactly nothing the first time it mattered**, because
+# the mistake took the other shape: not a private path hiding under a public
+# prefix, but a public path with a private ACTION on it. `/invite/{token}` is a
+# page anybody may read, and its POST needed an identity — which on a public
+# branch never arrives, since forward_auth does not run there and `noforge`
+# strips the headers. It answered 503, correctly, saying the gate was not in
+# front of it.
+#
+# Authentication that is optional per-method has nowhere to live when the proxy
+# decides who you are before the app answers. Accepting an invitation now lives
+# at /app/join/{token}, on the gated side, and this list stays a list of paths
+# where **nothing needs to know who is asking**.
 PUBLIC_PATHS = ["/", "/health", "/static/*", "/login", "/logout", "/invite/*"]
 
 # Not public — these carry a per-user key — but they must not go through the
@@ -308,14 +321,49 @@ async def invite_landing(request: Request, token: str, db: Session = Depends(get
                                       {"inv": inv, "gateway": auth_gateway_mode()})
 
 
-@app.post("/invite/{token}")
-async def invite_accept(request: Request, token: str, db: Session = Depends(get_db),
-                        user: User = Depends(get_current_user)):
+@app.get("/app/join/{token}", response_class=HTMLResponse)
+async def join_confirm(request: Request, token: str, db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    """Accepting an invitation, on the gated side of the fence.
+
+    This lives under /app and not under /invite, and the reason is the trap
+    ArguMap paid for: **the accepting half needs an identity, and /invite/* is
+    declared public** — so it never goes through the gate's forward_auth and
+    `noforge` strips the identity headers on the way in. The result was a 503
+    saying "the gate is not in front of this request", which was true and was my
+    own doing. Authentication that is optional per-method has nowhere to live
+    when the proxy decides who you are before the app answers; splitting by
+    prefix is the fix, and everything under /app is gated by construction.
+
+    It is also why the confirmation is a page rather than a straight POST from
+    the public side: a POST does not survive the round trip through the login —
+    the gate sends you back with a GET, and the body is gone.
+    """
     inv = db.query(Invitation).filter(Invitation.token == token).first()
     if inv is None or inv.accepted_at is not None:
         raise HTTPException(status_code=404, detail="This invitation is not valid any more.")
-    existing = role_for(db, inv.workspace_id, user)
-    if existing is None:
+    return templates.TemplateResponse(request, "join.html", {
+        "user": user, "inv": inv, "ws": None, "boards": workspaces_of(db, user),
+        "pending": 0, "already": role_for(db, inv.workspace_id, user),
+        "mismatch": inv.email.strip().lower() != (user.email or "").strip().lower(),
+    })
+
+
+@app.post("/app/join/{token}")
+async def join_accept(token: str, db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    inv = db.query(Invitation).filter(Invitation.token == token).first()
+    if inv is None or inv.accepted_at is not None:
+        raise HTTPException(status_code=404, detail="This invitation is not valid any more.")
+    # An invitation is addressed, not bearer: it was sent to one mailbox, and a
+    # forwarded link should not quietly hand a private board to a third person.
+    # The address comes from the gate, so comparing it is worth something.
+    if inv.email.strip().lower() != (user.email or "").strip().lower():
+        raise HTTPException(status_code=400, detail=(
+            f"This invitation was sent to {inv.email}, and you are signed in as "
+            f"{user.email}. Ask for one addressed to this account, or sign in with "
+            f"the other."))
+    if role_for(db, inv.workspace_id, user) is None:
         db.add(Membership(workspace_id=inv.workspace_id, user_id=user.id,
                           role=inv.role, invited_by=inv.invited_by))
         log_event(db, inv.workspace_id, "member_added", actor=user, email=user.email)

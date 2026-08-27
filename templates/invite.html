@@ -8,12 +8,15 @@
     As an editor you can add notes, reorder the list, mark things done and propose
     new tasks. Creating and deleting them stays with the owner.
   </p>
-  <form method="post" action="/invite/{{ inv.token }}">
-    <button class="btn" type="submit">Accept the invitation</button>
-  </form>
+  {# A link and not a form, and the target is under /app: this page is public,
+     so nothing here knows who is reading it, and the accepting half has to live
+     on the gated side where an identity exists. A POST from here would also not
+     survive the trip through the login — the gate sends you back with a GET. #}
+  <p><a class="btn" href="/app/join/{{ inv.token }}">Accept the invitation</a></p>
   <p class="muted small">
     {% if gateway %}
-      You will be asked to sign in with your Borant ID first.
+      You will be asked to sign in first. The invitation is addressed to
+      {{ inv.email }}, so use that account.
     {% else %}
       You need to be signed in with the account for {{ inv.email }}.
     {% endif %}
