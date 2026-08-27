@@ -30,11 +30,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+import crypto
 import mailer
+import settings
 from auth import (
     WorkspaceAccess, check_api_key, create_token,
     gateway_mode as auth_gateway_mode, get_current_user, hash_password,
-    set_caller, verify_password, workspace_dep,
+    require_admin, set_caller, verify_password, workspace_dep,
 )
 from models import (
     DEFAULT_EFFORT, EFFORTS, EFFORT_LABELS, EFFORT_WEIGHTS, NOTIFICATIONS,
@@ -688,7 +690,7 @@ async def settings_page(request: Request,
         prefs=prefs, keys=keys,
         invites=db.query(Invitation).filter(Invitation.workspace_id == ws.id,
                                             Invitation.accepted_at.is_(None)).all(),
-        smtp_on=os.environ.get("SMTP_ENABLED", "").lower() in ("1", "true", "yes")))
+        smtp_on=settings.get_bool(db, "smtp_enabled")))
 
 
 @app.post("/app/{workspace_id}/members")
@@ -704,7 +706,7 @@ async def invite_member(email: str = Form(...), role: str = Form("editor"),
     db.add(inv)
     db.flush()
     subject, body = mailer.invitation(acc.user.label, acc.workspace.name, inv.token)
-    ok, code = mailer.send(email, subject, body)
+    ok, code = mailer.send(db, email, subject, body)
     db.commit()
     # When the relay is off the link is shown on screen: a dead mailbox should
     # cost a copy-paste, not a person who cannot be invited.
@@ -798,3 +800,111 @@ async def revoke_key(key_id: int, acc: WorkspaceAccess = Depends(workspace_dep("
     row.revoked_at = utcnow()
     db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}/settings", status_code=302)
+
+
+# ── administration ────────────────────────────────────────────────────────────
+#
+# A different axis from the boards, not a level above them. An admin configures
+# the relay everybody sends through and can deactivate an account; an admin does
+# NOT reach anybody's list, because reaching a board is a membership row and
+# /admin issues none. Without that line, "administrator" would quietly mean
+# "reads everyone's coordination with their colleagues".
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request, user: User = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    users = db.query(User).order_by(User.is_active.desc(), User.email).all()
+    return templates.TemplateResponse(request, "admin.html", {
+        "user": user, "ws": ensure_workspace(db, user), "role": "owner",
+        "is_owner": True, "boards": workspaces_of(db, user), "pending": 0,
+        "cfg": settings.smtp_config(db),
+        "has_password": settings.has_password(db),
+        "crypto_ok": crypto.available(),
+        "securities": settings.SECURITIES,
+        "users": users,
+        "admins": sum(1 for u in users if u.is_admin and u.is_active),
+    })
+
+
+@app.post("/admin/smtp")
+async def admin_smtp(request: Request, user: User = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    form = dict(await request.form())
+    security = (form.get("smtp_security") or "starttls").strip().lower()
+    if security not in settings.SECURITIES:
+        raise HTTPException(status_code=400, detail="Unknown transport security.")
+    settings.put(db, "smtp_enabled",
+                 "1" if form.get("smtp_enabled") in ("1", "on", "true") else "0", user)
+    settings.put(db, "smtp_host", (form.get("smtp_host") or "").strip(), user)
+    settings.put(db, "smtp_port", (form.get("smtp_port") or "587").strip(), user)
+    settings.put(db, "smtp_security", security, user)
+    settings.put(db, "smtp_username", (form.get("smtp_username") or "").strip(), user)
+    settings.put(db, "smtp_from_email", (form.get("smtp_from_email") or "").strip(), user)
+    settings.put(db, "smtp_from_name", (form.get("smtp_from_name") or "TheList").strip(), user)
+
+    # A blank password box is the normal state of a configured relay, never an
+    # instruction to forget it: the form does not round-trip the secret back to
+    # the browser, so it has nothing to send back. Clearing is its own button.
+    code = settings.set_smtp_password(db, form.get("smtp_password") or "", user)
+    db.commit()
+    return RedirectResponse(f"/admin?saved=1&pw={code}", status_code=302)
+
+
+@app.post("/admin/smtp/clear-password")
+async def admin_smtp_clear(user: User = Depends(require_admin),
+                           db: Session = Depends(get_db)):
+    settings.clear_smtp_password(db, user)
+    db.commit()
+    return RedirectResponse("/admin?pw=cleared", status_code=302)
+
+
+@app.post("/admin/smtp/test")
+async def admin_smtp_test(to: str = Form(""), user: User = Depends(require_admin),
+                          db: Session = Depends(get_db)):
+    """Send one message to a named address and report the code verbatim.
+
+    This exists because "is the relay working" is otherwise answered by waiting
+    for somebody else's invitation to silently not arrive. The result is the
+    mailer's own code — `auth_refused 535` is worth more than "something went
+    wrong", and it is the string you can search for.
+    """
+    to = (to or user.email).strip()
+    ok, code = mailer.send(db, to, "TheList: test message",
+                           "This is a test from TheList's admin page.\n\n"
+                           "If you are reading it, the relay works.\n")
+    return RedirectResponse(f"/admin?test={code}&to={to}", status_code=302)
+
+
+@app.post("/admin/users/{user_id}")
+async def admin_user(user_id: int, action: str = Form(...),
+                     user: User = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    target = db.query(User).get(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Two guards, and they are the same guard: never leave the app with nobody
+    # who can configure it. Locking yourself out of a mail relay is recoverable
+    # only from a shell, and the person who needs it will not have one.
+    last_admin = (target.is_admin and target.is_active and
+                  db.query(User).filter(User.is_admin == True,  # noqa: E712
+                                        User.is_active == True,  # noqa: E712
+                                        User.id != target.id).count() == 0)
+    if action in ("demote", "deactivate") and last_admin:
+        raise HTTPException(status_code=400, detail=(
+            "That is the last administrator. Promote somebody else first, or "
+            "there will be nobody left who can configure the mail relay."))
+
+    if action == "promote":
+        target.is_admin = True
+    elif action == "demote":
+        target.is_admin = False
+    elif action == "deactivate":
+        target.is_active = False
+    elif action == "activate":
+        target.is_active = True
+    else:
+        raise HTTPException(status_code=400, detail="Unknown action.")
+    db.commit()
+    return RedirectResponse("/admin", status_code=302)

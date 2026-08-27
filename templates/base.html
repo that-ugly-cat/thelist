@@ -18,6 +18,7 @@
       <a href="/app/{{ ws.id }}/report">Report</a>
       <a href="/app/{{ ws.id }}/settings">Settings</a>
     {% endif %}
+    {% if user.is_admin %}<a href="/admin">Admin</a>{% endif %}
     <span class="who">{{ user.label }}</span>
     <a href="/logout" class="muted">Sign out</a>
   </nav>

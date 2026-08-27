@@ -20,8 +20,11 @@ in; whoever renders the page does. The raw library text passes through
 untranslated on purpose — `ConnectError: [Errno 111]` is nobody's language and
 translating it would only make it harder to search for.
 
-Configured from the environment, unlike Borant ID: there the mailbox was not
-known at deploy time, here it already exists.
+Configured from /admin and stored in the database, like Borant ID: the mailbox
+is not known at deploy time and does not belong in a compose file. The password
+is Fernet-encrypted and write-only in the form — **one admin sets the relay up
+and everybody sends through it without ever being able to read it**, which is
+the point of having the level at all.
 """
 import logging
 import os
@@ -30,6 +33,7 @@ import ssl
 from email.message import EmailMessage
 from email.utils import formataddr
 
+import settings
 from models import NOTIFICATIONS, NotificationPref
 
 log = logging.getLogger("thelist.mail")
@@ -37,22 +41,9 @@ log = logging.getLogger("thelist.mail")
 TIMEOUT = 15
 
 
-def _cfg() -> dict:
-    return {
-        "enabled": os.environ.get("SMTP_ENABLED", "").strip().lower() in ("1", "true", "yes"),
-        "host": os.environ.get("SMTP_HOST", "").strip(),
-        "port": int(os.environ.get("SMTP_PORT", "587") or 587),
-        "security": os.environ.get("SMTP_SECURITY", "starttls").strip().lower(),
-        "username": os.environ.get("SMTP_USERNAME", "").strip(),
-        "password": os.environ.get("SMTP_PASSWORD", ""),
-        "from_email": os.environ.get("SMTP_FROM", "").strip(),
-        "from_name": os.environ.get("SMTP_FROM_NAME", "TheList").strip(),
-    }
-
-
-def send(to: str, subject: str, body: str) -> tuple[bool, str]:
+def send(db, to: str, subject: str, body: str) -> tuple[bool, str]:
     """(ok, code). Never raises — see the module docstring."""
-    cfg = _cfg()
+    cfg = settings.smtp_config(db)
     if not cfg["enabled"]:
         return False, "smtp_off"
     if not cfg["host"] or not cfg["from_email"]:
@@ -105,7 +96,7 @@ def notify(db, user, event_type: str, subject: str, body: str) -> tuple[bool, st
     errors to whoever triggered them: their action succeeded either way."""
     if not wants(db, user, event_type):
         return False, "opted_out"
-    ok, code = send(user.email, subject, body)
+    ok, code = send(db, user.email, subject, body)
     if not ok and code != "smtp_off":
         log.warning("mail %s to %s failed: %s", event_type, user.email, code)
     return ok, code

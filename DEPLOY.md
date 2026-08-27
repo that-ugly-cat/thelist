@@ -21,14 +21,24 @@ Fill in `.env`:
   saying why — and you cannot reproduce it from the box, because on `127.0.0.1`
   the same call works.
 - `AUTH_MODE` — start on `local`, switch to `gateway` once the Caddy block is in.
-- SMTP — optional. With it off the app behaves identically and invitation links
-  are shown on screen.
+- `FERNET_KEY` — optional, and deliberately so. It encrypts the stored SMTP
+  password; without it the app boots and runs identically and only the mail
+  section of `/admin` says it cannot store one. Generate with
+  `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+- **No SMTP_\* variables.** The relay is configured from `/admin` after the app
+  is running, by the first account, and lives in the database.
 
 ```bash
 docker compose up -d --build
 docker exec thelist python seed.py     # the first account, local mode
 curl -s localhost:8020/health          # {"ok":true}
 ```
+
+**The first account is the administrator**, in either mode — somebody has to be
+able to configure the relay. In gateway mode that means the first person to walk
+through the gate, so hand out the grants in the order you want that decided, and
+walk in first. `docker exec thelist python admin.py --list` shows who ended up
+with it; `--promote` fixes it.
 
 ## Caddy
 
@@ -54,8 +64,11 @@ do it is noted in the wiki, not here.
    there is no `App` row to hang a grant on, so nobody can be let in. Add a line
    to `PERIMETER` in `borant-id/seed.py`, deploy that, and run
    `docker exec borantid python seed.py --apps` (idempotent — it only adds what
-   is missing). TheList declares **no roles**: the role here is per-board and
-   lives in `memberships`, and the app reads no hint header.
+   is missing). TheList declares one role, `admin`, and it is worth knowing what
+   it is not: **the per-board role — owner, editor — is never suggested by the
+   gate**, it lives in `memberships`. `admin` here configures the mail relay and
+   deactivates accounts, and opens nobody's list. An unknown hint is treated as a
+   typo, logged, and grants nothing.
 3. Grant access to the people who need it, from Borant ID's `/admin`. **A new
    account arrives with zero grants**: without one, a legitimate person meets a
    closed door and it looks like a bug.

@@ -30,8 +30,8 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from models import (
-    ApiKey, Membership, User, Workspace, ensure_workspace, get_db, has_role,
-    role_for, utcnow,
+    ApiKey, Membership, User, Workspace, bootstrap_admin, ensure_workspace,
+    get_db, has_role, role_for, utcnow,
 )
 
 log = logging.getLogger("thelist.auth")
@@ -142,16 +142,33 @@ def user_from_gateway(request: Request, db: Session) -> User | None:
         log.info("gateway: linked existing local account %s to %s", email, sub)
         return existing if existing.is_active else None
 
+    # The gate may suggest `admin`, and it is honoured — with the same caution
+    # PaperTrail uses: an unknown hint is a typo, not a role, and grants nothing.
+    #
+    # The deviation from "never provision privilege from a header" is narrow and
+    # rests on what admin means HERE: it configures the mail relay and can
+    # deactivate accounts. It does **not** open anybody's list — those are
+    # membership rows and an admin has none. So the worst a wrong hint buys is
+    # somebody editing an SMTP host, not reading a private board.
+    hint = (request.headers.get("x-borant-hint", "") or "").strip().lower()
+    wants_admin = hint == "admin"
+    if hint and not wants_admin:
+        log.warning("gateway: hint %r is not a role in this app, ignored", hint)
+
     user = User(email=email,
                 name=request.headers.get("x-borant-name", "") or email,
                 hashed_password=hash_password(secrets.token_urlsafe(32)),
-                borant_sub=sub, is_active=True)
+                borant_sub=sub, is_active=True, is_admin=wants_admin)
     db.add(user)
     db.commit()
     db.refresh(user)
+    # Somebody has to be able to configure the relay: the first account to exist
+    # gets it. See models.bootstrap_admin — whoever walks in first.
+    if bootstrap_admin(db, user):
+        log.info("gateway: %s is the first account, made admin", email)
     ensure_workspace(db, user)
     db.commit()
-    log.info("gateway: new profile for %s (%s)", email, sub)
+    log.info("gateway: new profile for %s (%s), admin=%s", email, sub, user.is_admin)
     return user
 
 
@@ -187,6 +204,22 @@ def touch(db: Session, user: User) -> None:
     if user.last_seen_at is None or (now - user.last_seen_at).total_seconds() > 3600:
         user.last_seen_at = now
         db.commit()
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """The administration level, and what it deliberately is not.
+
+    An admin configures the mail relay everybody sends through, and can
+    deactivate an account. **It grants no access to anybody's list**: reaching a
+    board is a `Membership` row and an admin has none, so /admin is a different
+    axis from the boards rather than a level above them. Without that separation
+    "administrator" would quietly mean "reads everyone's coordination with their
+    colleagues", which is not what anyone is asking for when they ask for an
+    admin level.
+    """
+    if not user.is_admin:
+        raise HTTPException(status_code=404, detail="Not found")
+    return user
 
 
 class WorkspaceAccess:

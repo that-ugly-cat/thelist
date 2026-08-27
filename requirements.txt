@@ -6,4 +6,5 @@ python-multipart
 sqlalchemy
 bcrypt
 python-jose[cryptography]
+cryptography
 mcp>=2.0,<3

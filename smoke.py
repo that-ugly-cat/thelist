@@ -17,7 +17,13 @@ os.chdir(HERE)
 os.environ.setdefault("JWT_SECRET", "smoke-test-secret")
 os.environ["DATABASE_URL"] = "sqlite:///./data/smoke.db"
 os.environ["AUTH_MODE"] = "local"
-os.environ["SMTP_ENABLED"] = "false"
+# An ephemeral key, so the run is deterministic wherever it happens. Without one
+# the app still boots and 93 of these checks still pass — only the three about a
+# stored SMTP password fail, which is the degradation crypto.py promises. That is
+# worth knowing and not worth failing a test run over.
+if not os.environ.get("FERNET_KEY"):
+    from cryptography.fernet import Fernet
+    os.environ["FERNET_KEY"] = Fernet.generate_key().decode()
 
 db_file = HERE / "data" / "smoke.db"
 db_file.parent.mkdir(exist_ok=True)
@@ -239,6 +245,112 @@ def main_() -> int:
         r = E.post(f"/app/{ws_id}/people/1", data={"display_name": "Hijack"},
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
+
+        print("\n— administration is a different axis, not a level above —")
+        db = SessionLocal()
+        o = db.query(User).filter(User.email == "owner@example.org").first()
+        o.is_admin = True
+        db.commit()
+        db.close()
+        r = E.get("/admin", follow_redirects=False)
+        check("a member cannot even see /admin", r.status_code == 404, str(r.status_code))
+        r = O.get("/admin")
+        check("an admin can", r.status_code == 200)
+        check("...and the page says what it does not grant",
+              "gives access to nobody" in r.text)
+        # The line that matters: admin is not membership.
+        r = O.get(f"/app/{ws_id}")
+        stranger_ws = None
+        db = SessionLocal()
+        from models import Workspace as _W
+        stranger_ws = (db.query(_W)
+                         .filter(_W.owner_user_id ==
+                                 db.query(User).filter(
+                                     User.email == "stranger@example.org").first().id)
+                         .first().id)
+        db.close()
+        # Make the stranger an admin and check they still cannot read the owner's board.
+        db = SessionLocal()
+        s_user = db.query(User).filter(User.email == "stranger@example.org").first()
+        s_user.is_admin = True
+        db.commit()
+        db.close()
+        r = S.get(f"/app/{ws_id}", follow_redirects=False)
+        check("an admin still gets 404 on a board they are not a member of",
+              r.status_code == 404, str(r.status_code))
+        r = S.get("/admin")
+        check("...while reaching /admin fine", r.status_code == 200)
+        db = SessionLocal()
+        s_user = db.query(User).filter(User.email == "stranger@example.org").first()
+        s_user.is_admin = False
+        db.commit()
+        db.close()
+
+        print("\n— the relay: written by one, used by all, read by none —")
+        import settings as S_
+        r = O.post("/admin/smtp", data={
+            "smtp_enabled": "1", "smtp_host": "smtp.example.org", "smtp_port": "587",
+            "smtp_security": "starttls", "smtp_username": "postmaster",
+            "smtp_password": "hunter2", "smtp_from_email": "list@example.org",
+            "smtp_from_name": "TheList"}, follow_redirects=False)
+        check("an admin can save the relay", r.status_code == 302)
+        db = SessionLocal()
+        check("the password is stored encrypted, not in clear",
+              "hunter2" not in S_.get(db, "smtp_password_enc")
+              and S_.get(db, "smtp_password_enc") != "")
+        check("...and the mailer can still read it",
+              S_.smtp_config(db)["password"] == "hunter2")
+        db.close()
+        r = O.get("/admin")
+        check("the form never sends the password back", "hunter2" not in r.text)
+        r = E.get(f"/app/{ws_id}/settings")
+        check("a member sees that mail is on, not what it is on",
+              r.status_code == 200 and "hunter2" not in r.text
+              and "smtp.example.org" not in r.text)
+
+        r = O.post("/admin/smtp", data={
+            "smtp_enabled": "1", "smtp_host": "smtp.example.org", "smtp_port": "587",
+            "smtp_security": "starttls", "smtp_username": "postmaster",
+            "smtp_password": "", "smtp_from_email": "list@example.org",
+            "smtp_from_name": "TheList"}, follow_redirects=False)
+        db = SessionLocal()
+        check("a blank password box keeps the stored one",
+              S_.smtp_config(db)["password"] == "hunter2")
+        db.close()
+        r = O.post("/admin/smtp/clear-password", follow_redirects=False)
+        db = SessionLocal()
+        check("clearing is its own button", S_.smtp_config(db)["password"] == "")
+        db.close()
+
+        r = O.post("/admin/smtp", data={"smtp_host": "x", "smtp_security": "carrier-pigeon"},
+                   follow_redirects=False)
+        check("an unknown transport security is refused", r.status_code == 400)
+
+        print("\n— nobody can lock the app out of itself —")
+        db = SessionLocal()
+        admin_id = db.query(User).filter(User.email == "owner@example.org").first().id
+        db.close()
+        r = O.post(f"/admin/users/{admin_id}", data={"action": "demote"},
+                   follow_redirects=False)
+        check("the last admin cannot demote themselves", r.status_code == 400,
+              str(r.status_code))
+        r = O.post(f"/admin/users/{admin_id}", data={"action": "deactivate"},
+                   follow_redirects=False)
+        check("...nor deactivate themselves", r.status_code == 400)
+        db = SessionLocal()
+        eid = db.query(User).filter(User.email == "editor@example.org").first().id
+        db.close()
+        r = O.post(f"/admin/users/{eid}", data={"action": "promote"},
+                   follow_redirects=False)
+        check("promoting somebody else works", r.status_code == 302)
+        r = O.post(f"/admin/users/{admin_id}", data={"action": "demote"},
+                   follow_redirects=False)
+        check("...and then stepping down is allowed", r.status_code == 302)
+        db = SessionLocal()
+        db.query(User).filter(User.email == "owner@example.org").first().is_admin = True
+        db.query(User).filter(User.email == "editor@example.org").first().is_admin = False
+        db.commit()
+        db.close()
 
     # ── the MCP surface, called as its owner ──────────────────────────────────
     #

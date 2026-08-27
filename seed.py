@@ -11,7 +11,7 @@ import os
 import sys
 
 from auth import hash_password
-from models import SessionLocal, User, ensure_workspace, init_db
+from models import SessionLocal, User, bootstrap_admin, ensure_workspace, init_db
 
 
 def main() -> int:
@@ -32,10 +32,16 @@ def main() -> int:
         else:
             user = User(email=email, name=name or email,
                         hashed_password=hash_password(password),
-                        is_active=True, is_admin=True)
+                        is_active=True)
             db.add(user)
             db.commit()
             db.refresh(user)
+            # Somebody has to be able to configure the mail relay; the first
+            # account is that somebody. After this one, admin is given
+            # deliberately (from /admin, or admin.py).
+            if bootstrap_admin(db, user):
+                print("         ...and is the administrator, being first")
+            db.commit()
             print(f"created: {email}")
         ws = ensure_workspace(db, user)
         db.commit()

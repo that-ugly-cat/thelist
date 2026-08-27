@@ -330,6 +330,18 @@ class Invitation(Base):
     workspace = relationship("Workspace")
 
 
+class Setting(Base):
+    """Key/value for what is configured from the interface instead of the
+    environment — today the SMTP relay. The password is stored Fernet-encrypted
+    and is write-only in the form: an admin sets the relay up once and everybody
+    else sends through it without ever being able to read it."""
+    __tablename__ = "settings"
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
 class ApiKey(Base):
     """An MCP key carries an identity, not a capability (SPEC.md §9).
 
@@ -383,6 +395,26 @@ def workspaces_of(db, user) -> list:
               .join(Membership, Membership.workspace_id == Workspace.id)
               .filter(Membership.user_id == user.id)
               .order_by(Workspace.id).all())
+
+
+def bootstrap_admin(db, user) -> bool:
+    """The first account to exist becomes the administrator.
+
+    Somebody has to be able to configure the relay, and behind the gate the first
+    arrival is whoever was granted access first — in practice the person who set
+    the thing up. The alternative, shipping with a hardcoded admin or a flag in
+    the environment, means a credential in a compose file for a role that only
+    edits an SMTP host.
+
+    It is a bootstrap and not a rule: after the first, everybody arrives plain,
+    and admin is given deliberately from /admin or from `admin.py`. Worth knowing
+    before you hand out grants — **whoever walks in first gets it**, so walk in
+    first.
+    """
+    if db.query(User).filter(User.is_admin == True).first() is not None:  # noqa: E712
+        return False
+    user.is_admin = True
+    return True
 
 
 def ensure_workspace(db, user) -> Workspace:

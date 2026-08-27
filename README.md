@@ -102,9 +102,35 @@ Renaming and archiving people, invitations, mail preferences and keys stay out o
 the surface on purpose: renaming a person rewrites how the whole past reads, and
 that is a thing to do while looking at the page.
 
+## Administration
+
+One level, and it is **a different axis from the boards rather than a level above
+them**. An admin configures the mail relay everybody sends through and can
+deactivate an account; an admin reaches **nobody's list**, because reaching a
+board is a membership row and `/admin` issues none. Without that line,
+"administrator" would quietly mean "reads everyone's coordination with their
+colleagues".
+
+The relay is set once, from `/admin`, and the password is **write-only**: it is
+Fernet-encrypted at rest and never sent back to the page. Everyone's mail goes
+through it, nobody can read it. There is a *send a test* button, because
+otherwise "does the relay work" gets answered by waiting for somebody else's
+invitation to silently not arrive — and the result is the mailer's own code, so
+`auth_refused 535` is a string you can search for.
+
+**Who is admin**: the first account to exist, because somebody has to be able to
+configure the relay and behind the gate the first arrival is whoever set the
+thing up. After that it is given deliberately. The last administrator cannot be
+demoted or deactivated from the interface — and `admin.py --promote` is the way
+back in when the account is gone for some other reason.
+
 ## Mail
 
-A degradable dependency: with `SMTP_ENABLED=false` the app behaves identically
-and invitation links are shown on screen. All messages are in English and all of
-them live in `mailer.py`, which is what makes that a claim you can check by
-reading one file.
+A degradable dependency: with the relay off the app behaves identically and
+invitation links are shown on screen. All messages are in English and all of them
+live in `mailer.py`, which is what makes that a claim you can check by reading
+one file.
+
+Configuration lives in the database, not the environment, and there is **no
+fallback between the two**: the day mail stops working, "which of the two is
+winning" has to be answerable from the screen.
