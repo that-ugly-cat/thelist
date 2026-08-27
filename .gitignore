@@ -1,0 +1,14 @@
+# La specifica resta locale: contiene analisi di sicurezza e decisioni scartate
+SPEC.md
+
+.env
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+data/
+.venv/

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ ws.name }} — TheList{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+
+<div class="head">
+  <h1>{{ ws.name }}</h1>
+  <div class="views">
+    <a href="/app/{{ ws.id }}" class="chip {% if view == 'list' and not archive %}on{% endif %}">The list</a>
+    <a href="/app/{{ ws.id }}?view=due" class="chip {% if view == 'due' %}on{% endif %}">By date</a>
+    <a href="/app/{{ ws.id }}?archive=1" class="chip {% if archive %}on{% endif %}">Archive</a>
+  </div>
+</div>
+
+{% if view == 'due' %}
+  <p class="note small">
+    Sorted by date, and this is a reading only — the order you dragged is
+    untouched. Tasks with no date do not appear here.
+  </p>
+{% endif %}
+
+<div class="filters">
+  <span class="lbl">For</span>
+  <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+     class="pill {% if not person %}on{% endif %}">everyone</a>
+  {% for p in people %}
+    <a class="pill {% if person == p.id|string %}on{% endif %}"
+       href="/app/{{ ws.id }}?person={{ p.id }}&view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}">{{ p.display_name }}</a>
+  {% endfor %}
+  {% if tags %}
+    <span class="lbl">Tag</span>
+    <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}"
+       class="pill {% if not tag %}on{% endif %}">all</a>
+    {% for t in tags %}
+      <a class="pill {% if tag == t.name %}on{% endif %}"
+         href="/app/{{ ws.id }}?tag={{ t.name }}&view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}">{{ t.display_name }}</a>
+    {% endfor %}
+  {% endif %}
+</div>
+
+<div class="split">
+<div class="listcol">
+  {% if not tasks %}
+    <p class="empty">{% if archive %}Nothing archived yet.{% else %}Nothing on the list.{% endif %}</p>
+  {% endif %}
+
+  <ul class="tasks" id="tasks" data-ws="{{ ws.id }}" data-version="{{ ws.order_version }}"
+      data-sortable="{{ 1 if (view == 'list' and not archive and not tag and not person) else 0 }}">
+    {% for t in tasks %}
+    <li class="task" id="task-{{ t.id }}" data-id="{{ t.id }}">
+      {% if view == 'list' and not archive and not tag and not person %}
+        <span class="grip" title="Drag to reorder">⠿</span>
+      {% else %}
+        <span class="grip off" title="Reordering only works on the unfiltered list">⠿</span>
+      {% endif %}
+
+      <div class="body">
+        <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
+        <div class="meta">
+          {% if t.for_person_id != self_id and t.person %}
+            <span class="pill who">for {{ t.person.display_name }}</span>
+          {% endif %}
+          {% for tag in t.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
+          <span class="pill effort e{{ t.effort }}" title="{{ EFFORT_LABELS[t.effort] }} — weight {{ EFFORT_WEIGHTS[t.effort] }}">{{ t.effort }}</span>
+          {% if t.recurring %}<span class="pill rec" title="Recurring: completing it keeps it on the list">↻</span>{% endif %}
+          {% if t.due_date %}
+            {% set left = (t.due_date - today()).days %}
+            <span class="pill due {% if left < 0 %}late{% elif left <= 7 %}soon{% endif %}">
+              {{ t.due_date.isoformat() }}
+            </span>
+          {% endif %}
+          {% if t.recurring and t.last_done_at %}
+            <span class="muted small">last done {{ t.last_done_at.date().isoformat() }}</span>
+          {% endif %}
+          {% if t.done_at %}<span class="muted small">done {{ t.done_at.date().isoformat() }}</span>{% endif %}
+          {% if t.link_url %}<a class="pill link" href="{{ t.link_url }}" target="_blank" rel="noopener">{{ t.link_label or 'link' }}</a>{% endif %}
+        </div>
+      </div>
+
+      <div class="actions">
+        {% if t.status == 'active' %}
+          <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/done">
+            <button class="mini ok" title="{% if t.recurring %}Record that you did it — it stays on the list{% else %}Mark done and archive{% endif %}">done</button>
+          </form>
+        {% else %}
+          <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/reopen">
+            <button class="mini">reopen</button>
+          </form>
+        {% endif %}
+        {% if is_owner %}
+          <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/delete"
+                onsubmit="return confirm('Remove from the list? It stays in the archive, notes included.')">
+            <button class="mini danger" title="Soft delete: it goes to the archive with its notes">×</button>
+          </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <p id="ordermsg" class="err hidden">
+    Someone else reordered this list while you were dragging. Reload and try again.
+  </p>
+</div>
+
+<aside id="panel" class="panel">
+  <div class="panelbody">
+    <h2>{% if is_owner %}Add to the list{% else %}Propose a task{% endif %}</h2>
+    {% if not is_owner %}
+      <p class="muted small">The owner accepts or declines it. You will hear either way.</p>
+    {% endif %}
+    <form method="post" action="/app/{{ ws.id }}/tasks" class="taskform">
+      <label>Title <input name="title" required maxlength="200"></label>
+      <label>For
+        <input name="for_person" list="people" placeholder="{% if is_owner %}Me{% else %}{{ user.label }}{% endif %}">
+      </label>
+      <label>Tags <input name="tags" list="tagnames" placeholder="BAG, ITE"></label>
+      <div class="row">
+        <label>Size
+          <select name="effort">
+            {% for e in EFFORTS %}<option value="{{ e }}" {% if e == 'M' %}selected{% endif %}>{{ e }} — {{ EFFORT_LABELS[e] }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Due <input type="date" name="due_date"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="recurring" value="1"> Recurring — every so often, no end date</label>
+      <label>Description <textarea name="description" rows="3"></textarea></label>
+      <div class="row">
+        <label>Link <input name="link_url" placeholder="https://…"></label>
+        <label>Label <input name="link_label" placeholder="PaperTrail"></label>
+      </div>
+      <button class="btn" type="submit">{% if is_owner %}Add{% else %}Propose{% endif %}</button>
+    </form>
+  </div>
+</aside>
+</div>
+
+<datalist id="people">{% for p in people %}<option value="{{ p.display_name }}">{% endfor %}</datalist>
+<datalist id="tagnames">{% for t in tags %}<option value="{{ t.display_name }}">{% endfor %}</datalist>
+
+<script src="/static/js/list.js"></script>
+{% endblock %}

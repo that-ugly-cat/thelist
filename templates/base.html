@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}TheList{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📋</text></svg>">
+</head>
+<body>
+{% if user %}
+<div class="topbar">
+  <a class="brand" href="/app">TheList</a>
+  <nav>
+    {% if ws %}
+      <a href="/app/{{ ws.id }}">The list</a>
+      <a href="/app/{{ ws.id }}/proposals">Proposals{% if pending %} <span class="dot">{{ pending }}</span>{% endif %}</a>
+      <a href="/app/{{ ws.id }}/report">Report</a>
+      <a href="/app/{{ ws.id }}/settings">Settings</a>
+    {% endif %}
+    <span class="who">{{ user.label }}</span>
+    <a href="/logout" class="muted">Sign out</a>
+  </nav>
+</div>
+{% if boards and boards|length > 1 %}
+<div class="boardbar">
+  {% for b in boards %}
+    <a href="/app/{{ b.id }}" class="chip {% if ws and b.id == ws.id %}on{% endif %}">{{ b.name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+<main class="container {% block main_class %}{% endblock %}">
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

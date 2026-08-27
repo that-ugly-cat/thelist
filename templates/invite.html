@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Invitation — TheList{% endblock %}
+{% block content %}
+<div class="narrow">
+  <h1>You have been invited</h1>
+  <p>to work on <strong>{{ inv.workspace.name }}</strong> as an editor.</p>
+  <p class="muted">
+    As an editor you can add notes, reorder the list, mark things done and propose
+    new tasks. Creating and deleting them stays with the owner.
+  </p>
+  <form method="post" action="/invite/{{ inv.token }}">
+    <button class="btn" type="submit">Accept the invitation</button>
+  </form>
+  <p class="muted small">
+    {% if gateway %}
+      You will be asked to sign in with your Borant ID first.
+    {% else %}
+      You need to be signed in with the account for {{ inv.email }}.
+    {% endif %}
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,84 @@
+{# The side panel: one task, its notes, and — for the owner — the form that edits
+   it. Loaded by fetch into #panel, so it renders no chrome of its own. #}
+<div class="panelbody">
+  <div class="panelhead">
+    <h2>{{ task.title }}</h2>
+    <button class="mini" data-close>×</button>
+  </div>
+
+  <div class="meta">
+    {% if task.person %}<span class="pill who">for {{ task.person.display_name }}</span>{% endif %}
+    {% for tag in task.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
+    <span class="pill effort e{{ task.effort }}">{{ task.effort }} — {{ EFFORT_LABELS[task.effort] }}</span>
+    {% if task.recurring %}<span class="pill rec">recurring</span>{% endif %}
+    {% if task.due_date %}<span class="pill due">{{ task.due_date.isoformat() }}</span>{% endif %}
+  </div>
+
+  {% if task.description %}<p class="desc">{{ task.description }}</p>{% endif %}
+  {% if task.recurring and task.last_done_at %}
+    <p class="muted small">Last done {{ task.last_done_at.date().isoformat() }}.</p>
+  {% endif %}
+  {% if task.status == 'rejected' %}
+    <p class="note small"><strong>Declined:</strong> {{ task.decision_reason }}</p>
+  {% endif %}
+
+  <h3>Notes</h3>
+  {% if not notes %}<p class="muted small">Nothing yet.</p>{% endif %}
+  <ul class="notes">
+    {% for n in notes %}
+      <li>
+        <div class="byline">
+          <strong>{{ n.author.label if n.author else 'someone' }}</strong>
+          <span class="muted small">{{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          {% if n.deletable_by(user) %}
+            <form method="post" action="/app/{{ ws.id }}/notes/{{ n.id }}/delete">
+              <button class="mini danger" title="Only within 15 minutes of writing it">×</button>
+            </form>
+          {% endif %}
+        </div>
+        <p>{{ n.body }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}/notes" class="noteform">
+    <textarea name="body" rows="2" placeholder="Add a note — it cannot be edited afterwards" required></textarea>
+    <button class="btn small" type="submit">Add note</button>
+  </form>
+
+  {% if is_owner %}
+    <h3>Edit</h3>
+    <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}" class="taskform">
+      <label>Title <input name="title" value="{{ task.title }}" required></label>
+      <label>For <input name="for_person" list="people" value="{{ task.person.display_name if task.person else '' }}"></label>
+      <label>Tags <input name="tags" list="tagnames" value="{{ task.tag_list | map(attribute='display_name') | join(', ') }}"></label>
+      <div class="row">
+        <label>Size
+          <select name="effort">
+            {% for e in EFFORTS %}<option value="{{ e }}" {% if e == task.effort %}selected{% endif %}>{{ e }} — {{ EFFORT_LABELS[e] }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Due <input type="date" name="due_date" value="{{ task.due_date.isoformat() if task.due_date else '' }}"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="recurring" value="1" {% if task.recurring %}checked{% endif %}> Recurring</label>
+      <label>Description <textarea name="description" rows="3">{{ task.description }}</textarea></label>
+      <div class="row">
+        <label>Link <input name="link_url" value="{{ task.link_url }}"></label>
+        <label>Label <input name="link_label" value="{{ task.link_label }}"></label>
+      </div>
+      <button class="btn" type="submit">Save</button>
+    </form>
+  {% endif %}
+
+  {% if events %}
+    <h3>History</h3>
+    <ul class="events">
+      {% for e in events %}
+        <li class="small muted">
+          {{ e.created_at.strftime('%Y-%m-%d %H:%M') }} — {{ e.type }}
+          {% if e.actor %}by {{ e.actor.label }}{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>

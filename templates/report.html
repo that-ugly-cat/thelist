@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Report — TheList{% endblock %}
+{% block content %}
+<h1>Where the work went</h1>
+
+<form class="period" method="get">
+  <label>From <input type="date" name="from" value="{{ raw_from }}"></label>
+  <label>To <input type="date" name="to" value="{{ raw_to }}"></label>
+  <button class="btn small" type="submit">Show</button>
+  <a class="btn small ghost" href="/app/{{ ws.id }}/report.csv?from={{ raw_from }}&to={{ raw_to }}">CSV</a>
+</form>
+
+{# The caveat is not decoration. Counting rows is not counting hours, and a
+   number left alone gets read as one. #}
+<p class="note">
+  <strong>These are counts, not hours.</strong>
+  <em>Touches</em> are completions in the period, recurring tasks included — a
+  recurring task done eleven times counts eleven, which is why it beats counting
+  tasks. <em>Weighted</em> multiplies each by its declared size
+  ({% for e, w in data.weights.items() %}{{ e }}&nbsp;=&nbsp;{{ w }}{% if not loop.last %}, {% endif %}{% endfor %}),
+  which separates the chapter from the website update — and is still not time.
+  While nobody touches the size menu the weighted column is just the raw one
+  times three, and you can see it here.
+</p>
+
+{% macro table(rows, what) %}
+  {% if not rows %}
+    <p class="empty">Nothing in this period.</p>
+  {% else %}
+  <table class="report">
+    <thead>
+      <tr><th>{{ what }}</th><th>on the list</th><th>opened</th><th>closed</th>
+          <th>touches</th><th>weighted</th><th>share</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="{% if r.is_self %}self{% endif %}">
+        <td>{{ r.label }}{% if r.is_self %} <span class="muted small">(you)</span>{% endif %}</td>
+        <td>{{ r.listed }}</td><td>{{ r.opened }}</td><td>{{ r.closed }}</td>
+        <td>{{ r.touches }}</td><td>{{ r.weighted }}</td>
+        <td>
+          <span class="bar" style="--w: {{ r.share }}%"></span>
+          <span class="pct">{{ r.share }}%</span>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% endmacro %}
+
+<h2 class="sec">By person <span class="muted small">{{ label }}</span></h2>
+{{ table(data.people, 'For') }}
+
+<h2 class="sec">By tag</h2>
+{{ table(data.tags, 'Tag') }}
+{% endblock %}

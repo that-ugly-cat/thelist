@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Settings — TheList{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+{% if request.query_params.get('invited') %}
+  <p class="note">
+    Invitation created.
+    {% if request.query_params.get('mail') != 'ok' %}
+      The mail did not go out (<code>{{ request.query_params.get('mail') }}</code>), so send this link yourself:
+    {% else %}
+      The link, in case you want to send it yourself too:
+    {% endif %}
+    <code>{{ request.base_url }}invite/{{ request.query_params.get('invited') }}</code>
+  </p>
+{% endif %}
+{% if request.query_params.get('key') %}
+  <p class="note">
+    New MCP key — <strong>shown once</strong>:
+    <code>{{ request.query_params.get('key') }}</code><br>
+    <span class="small muted">It carries your identity, so it reaches exactly what you reach.
+    One key per client, and revoke it if it leaks.</span>
+  </p>
+{% endif %}
+
+<h2 class="sec">People</h2>
+<p class="muted small">
+  Who tasks are for. They can be anyone — an account is not needed. Archiving one
+  keeps every past task pointing at them, it only takes them out of the menu.
+</p>
+<table class="plain">
+  {% for p in people %}
+  <tr class="{% if p.archived_at %}dim{% endif %}">
+    <td>
+      {% if is_owner %}
+      <form method="post" action="/app/{{ ws.id }}/people/{{ p.id }}" class="inline">
+        <input name="display_name" value="{{ p.display_name }}" {% if p.is_owner_self %}readonly{% endif %}>
+        {% if not p.is_owner_self %}
+          <label class="check small"><input type="checkbox" name="archived" value="1"
+            {% if p.archived_at %}checked{% endif %}> archived</label>
+        {% endif %}
+        <button class="mini">save</button>
+      </form>
+      {% else %}
+        {{ p.display_name }}
+      {% endif %}
+    </td>
+    <td class="muted small">
+      {% if p.is_owner_self %}you{% elif p.user %}has an account{% else %}no account{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2 class="sec">Who can see this list</h2>
+<table class="plain">
+  {% for m in members %}
+    <tr>
+      <td>{{ m.user.label }}</td>
+      <td class="muted small">{{ ROLE_LABELS[m.role] }}</td>
+      <td>
+        {% if is_owner and m.role != 'owner' %}
+        <form method="post" action="/app/{{ ws.id }}/members/{{ m.user_id }}/remove"
+              onsubmit="return confirm('Remove them? Their notes stay.')">
+          <button class="mini danger">remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+</table>
+
+{% if is_owner %}
+  {% if invites %}
+    <p class="muted small">Pending invitations:
+      {% for i in invites %}<code>{{ i.email }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+  {% endif %}
+  <form method="post" action="/app/{{ ws.id }}/members" class="inline">
+    <input type="email" name="email" placeholder="their email" required>
+    <button class="btn small">Invite as editor</button>
+  </form>
+{% endif %}
+
+<h2 class="sec">Mail</h2>
+{% if not smtp_on %}
+  <p class="note small">
+    The relay is off, so nothing is sent. The app works exactly the same: the
+    counter in the top bar is the truth, mail is only a reminder.
+  </p>
+{% endif %}
+<form method="post" action="/app/{{ ws.id }}/prefs">
+  {% for event_type, default in NOTIFICATIONS.items() %}
+    <label class="check">
+      <input type="checkbox" name="{{ event_type }}" value="1"
+        {% if prefs.get(event_type, default) %}checked{% endif %}>
+      {{ NOTIFICATION_LABELS[event_type] }}
+    </label>
+  {% endfor %}
+  <button class="btn small">Save</button>
+</form>
+
+<h2 class="sec">MCP keys</h2>
+<p class="muted small">
+  For reading this list from a chat. Read-only, and each key runs as you.
+</p>
+<table class="plain">
+  {% for k in keys %}
+    <tr>
+      <td>{{ k.label or 'unnamed' }}</td>
+      <td class="muted small">
+        created {{ k.created_at.date().isoformat() }} ·
+        {% if k.last_used_at %}last used {{ k.last_used_at.date().isoformat() }}{% else %}never used{% endif %}
+      </td>
+      <td>
+        <form method="post" action="/app/{{ ws.id }}/keys/{{ k.id }}/revoke">
+          <button class="mini danger">revoke</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+</table>
+<form method="post" action="/app/{{ ws.id }}/keys" class="inline">
+  <input name="label" placeholder="what client is this for">
+  <button class="btn small">New key</button>
+</form>
+{% endblock %}

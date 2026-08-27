@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Proposals — TheList{% endblock %}
+{% block content %}
+<h1>Proposals</h1>
+
+{% if not open_ %}
+  <p class="empty">Nothing waiting.</p>
+{% endif %}
+
+{% for t in open_ %}
+<div class="card prop">
+  <h2>{{ t.title }}</h2>
+  <div class="meta">
+    <span class="muted small">proposed by {{ t.creator.label if t.creator else 'someone' }}
+      on {{ t.created_at.date().isoformat() }}</span>
+    {% if t.person %}<span class="pill who">for {{ t.person.display_name }}</span>{% endif %}
+    {% for tag in t.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
+    <span class="pill effort e{{ t.effort }}">{{ t.effort }}</span>
+    {% if t.due_date %}<span class="pill due">{{ t.due_date.isoformat() }}</span>{% endif %}
+  </div>
+  {% if t.description %}<p class="desc">{{ t.description }}</p>{% endif %}
+
+  {% if is_owner %}
+  <div class="decide">
+    <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/accept">
+      <button class="btn small ok" type="submit">Accept</button>
+    </form>
+    <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/reject" class="reject">
+      <input name="reason" placeholder="Why not — required" required>
+      <button class="btn small" type="submit">Decline</button>
+    </form>
+  </div>
+  <p class="muted small">
+    A refusal with no reason comes back identical in two months, so the reason is
+    part of declining.
+  </p>
+  {% else %}
+    <p class="muted small">Waiting for {{ ws.owner.label }} to decide.</p>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if declined %}
+<h2 class="sec">Declined</h2>
+<p class="muted small">They stay here, with the reason. That is the point of them.</p>
+<ul class="declined">
+  {% for t in declined %}
+    <li>
+      <strong>{{ t.title }}</strong>
+      <span class="muted small">{{ t.decided_at.date().isoformat() if t.decided_at else '' }}</span>
+      <div class="why">{{ t.decision_reason }}</div>
+    </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

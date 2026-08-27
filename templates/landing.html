@@ -1,0 +1,53 @@
+{# A public shop window that never looks at who is reading it. No `{% if user %}`
+   anywhere in this file, on purpose: with the gate in front, identity headers are
+   stripped on the public branch, so such a test would be always false when gated
+   and sometimes true when not — the same page behaving two ways. One button
+   covers all four cases. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TheList</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📋</text></svg>">
+</head>
+<body>
+<main class="container landing">
+  <h1 class="hero">TheList</h1>
+  <p class="lede">
+    A list of the things worth remembering exist — owned by one person,
+    annotated by the people they work with.
+  </p>
+
+  <div class="cards">
+    <div class="card">
+      <h2>One order, declared</h2>
+      <p>The list is in the order the owner dragged it into. Deadlines are shown,
+         never sorted on: an automatic reordering would make the dragging mean
+         nothing.</p>
+    </div>
+    <div class="card">
+      <h2>Proposals, not edits</h2>
+      <p>Editors add notes, reorder, mark things done and propose new items. The
+         owner accepts or declines — and a declined proposal stays, with the
+         reason.</p>
+    </div>
+    <div class="card">
+      <h2>Recurring without a scheduler</h2>
+      <p>Some things just need doing every so often. Those stay on the list and
+         record when they were last done, instead of spawning copies of
+         themselves.</p>
+    </div>
+    <div class="card">
+      <h2>Who the work is for</h2>
+      <p>Every row says on whose behalf it exists, so the quarter can be counted:
+         how much was yours, how much was somebody else's.</p>
+    </div>
+  </div>
+
+  <p class="cta"><a class="btn" href="/app">Open the list</a></p>
+  <p class="foot muted small">A borant tool · thelist.borant.eu</p>
+</main>
+</body>
+</html>

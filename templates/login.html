@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sign in — TheList{% endblock %}
+{% block content %}
+<div class="narrow">
+  <h1>Sign in</h1>
+  {% if error %}<p class="err">Wrong address or password.</p>{% endif %}
+  <form method="post" action="/login">
+    <label>Email <input type="email" name="email" required autofocus></label>
+    <label>Password <input type="password" name="password" required></label>
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+  <p class="muted small">Access is by invitation from the owner of a list.</p>
+</div>
+{% endblock %}

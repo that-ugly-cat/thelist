@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: thelist
+    restart: unless-stopped
+    # Bound to loopback, not 0.0.0.0: the gate's design rests on the bind, and
+    # the firewall being outside the host is not a reason to skip it here.
+    ports:
+      - "127.0.0.1:8020:8020"
+    env_file:
+      - .env
+    # Guardrail on the shared 4 GB / 2-CPU box: this app is small, keep it small.
+    mem_limit: 250m
+    volumes:
+      - ./data:/app/data
