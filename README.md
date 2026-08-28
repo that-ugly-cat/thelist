@@ -10,7 +10,7 @@ reorder, mark things done and propose new items.
 scheduler, no burndown. A row is a thing worth remembering exists, not a unit of
 work to be broken down.
 
-## The five ideas
+## The ideas it rests on
 
 **One order, and it is manual.** The list is in the order the owner dragged it
 into. Due dates are shown and coloured, never sorted on — an automatic
@@ -35,10 +35,21 @@ tasks point at the paper, the shared folder and the thread where it was
 discussed. A missing scheme is filled in, and a link with no label shows a short
 form of its address rather than ninety characters of URL.
 
-**Notes are append-only.** They are the asynchronous channel between two people,
-and a note that can be edited afterwards is a conversation nobody can rely on.
-The author has fifteen minutes to fix a typo; after that, the correction is
-another note.
+**Notes are append-only, and they are the only thing that is.** Everything else
+on a task is a field — title, tags, size, due date, description, links,
+contacts. Notes are the asynchronous channel between two people, and one that can
+be edited afterwards is a conversation nobody can rely on. The author has fifteen
+minutes to fix a typo; after that, the correction is another note.
+
+**An earmark is a private dot**, one per person. The two properties that make it
+usable are both negative: it is not a permission, and it is not in the event log
+— so it never reaches the report or anybody else's history. A mark others can see
+is a message; a mark that gets counted is a commitment. This is neither.
+
+**Nothing reloads the page.** Completing, deleting, editing and noting all redraw
+in place. On a list you work through from the middle, a reload costs the scroll
+position, which is the difference between marking three things done and marking
+one.
 
 ## The report
 
@@ -66,7 +77,7 @@ CSV export is on the same page.
 cp .env.example .env      # JWT_SECRET is required
 python seed.py            # first account, local mode only
 python dev-run.py         # http://localhost:8020
-python smoke.py           # 126 checks, its own database
+python smoke.py           # 152 checks, its own database
 ```
 
 `AUTH_MODE=local` (the default) uses email and password. `AUTH_MODE=gateway`
@@ -75,7 +86,7 @@ either way: the gate is a mode, never a dependency.
 
 ## The MCP surface
 
-Seventeen tools, reading and writing, so the list can be kept from inside the
+Twenty-three tools, reading and writing, so the list can be kept from inside the
 conversation where the work is actually being discussed.
 
 **Reading** — `list_boards`, `list_tasks`, `get_task`, `upcoming`,
@@ -83,7 +94,8 @@ conversation where the work is actually being discussed.
 
 **Writing** — `add_task`, `update_task`, `complete_task`, `reopen_task`,
 `add_note`, `accept_proposal`, `decline_proposal`, `move_task`, `delete_task`,
-`restore_task`.
+`restore_task`, plus `add_task_link` / `edit_task_link` / `remove_task_link` and
+the same three for contacts. Twenty-three in total.
 
 Keys are created per user in Settings and carry an **identity, not a
 capability**: a call reaches exactly what its owner reaches. A board the caller
