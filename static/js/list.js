@@ -17,15 +17,14 @@
   // starts a drag gesture, and browsers disagree about whether the click that
   // follows still fires. It also makes the text inside unselectable, which on a
   // row that now shows two lines of description is worse.
-  if (sortable) {
-    list.querySelectorAll(".task").forEach((li) => {
-      const grip = li.querySelector(".grip");
-      if (grip) {
-        grip.addEventListener("pointerdown", () => { li.draggable = true; });
-        grip.addEventListener("pointerup", () => { li.draggable = false; });
-      }
+  function wireDrag(li) {
+    const grip = li.querySelector(".grip");
+    if (grip) {
+      grip.addEventListener("pointerdown", () => { li.draggable = true; });
+      grip.addEventListener("pointerup", () => { li.draggable = false; });
+    }
 
-      li.addEventListener("dragstart", (e) => {
+    li.addEventListener("dragstart", (e) => {
         if (!li.draggable) return;
         dragged = li;
         li.classList.add("dragging");
@@ -34,7 +33,7 @@
         e.dataTransfer.setData("text/plain", li.dataset.id);
       });
 
-      li.addEventListener("dragend", () => {
+    li.addEventListener("dragend", () => {
         li.classList.remove("dragging");
         li.draggable = false;
         list.querySelectorAll(".task").forEach((x) => x.classList.remove("over"));
@@ -42,7 +41,7 @@
         save();
       });
 
-      li.addEventListener("dragover", (e) => {
+    li.addEventListener("dragover", (e) => {
         if (!dragged) return;
         e.preventDefault();
         if (dragged === li) return;
@@ -52,8 +51,43 @@
         list.insertBefore(dragged, below ? li.nextSibling : li);
       });
 
-      li.addEventListener("dragleave", () => li.classList.remove("over"));
-    });
+    li.addEventListener("dragleave", () => li.classList.remove("over"));
+  }
+
+  function wireAllDrag() {
+    if (!sortable) return;
+    document.querySelectorAll("#tasks .task").forEach(wireDrag);
+  }
+  wireAllDrag();
+
+  // ── redraw the list in place ──
+  //
+  // Completing, deleting or reopening used to POST and redirect, which meant a
+  // full page load: back to the top, and a long scroll to find where you were.
+  // On a list you work through from the middle, that is the difference between
+  // marking three things done and marking one.
+  //
+  // The whole <ul> is replaced rather than the single row, because one action
+  // can change more than one row: completing a recurring task leaves it in
+  // place with a new date, deleting frees a position, and both change what the
+  // filters would show. Re-fetching the current URL keeps whatever filter is on.
+  function refreshList() {
+    return fetch(location.href, { headers: { "X-Requested-With": "fetch" } })
+      .then((r) => r.text())
+      .then((html) => {
+        const fresh = new DOMParser().parseFromString(html, "text/html");
+        const ul = fresh.querySelector("#tasks");
+        const cur = document.getElementById("tasks");
+        if (!ul || !cur) return location.reload();
+        cur.innerHTML = ul.innerHTML;
+        cur.dataset.version = ul.dataset.version;
+        wireAllDrag();
+        // The proposals counter in the top bar can have moved too.
+        const dot = fresh.querySelector(".topbar .dot");
+        const here = document.querySelector(".topbar .dot");
+        if (here && dot) here.textContent = dot.textContent;
+        else if (here && !dot) here.remove();
+      });
   }
 
   function save() {
@@ -182,10 +216,11 @@
     const touched = dlg.dataset.touched === "1";
     dlg.close();
     dlg.remove();
-    // Reload only if something actually changed while it was open: a stale list
-    // under a closed dialog is a lie, but reloading after a pure read throws
-    // away the scroll position for nothing.
-    if (touched) location.reload();
+    // Same reasoning as everywhere else on this page: redraw, never reload. A
+    // stale list under a closed dialog is a lie, but a reload costs the scroll
+    // position, and after editing one task in the middle of a long list that is
+    // exactly where you want to stay.
+    if (touched) refreshList();
   }
 
   // ── forms inside the task modal submit without closing it ──
@@ -270,6 +305,20 @@
     dlg.querySelector("[data-cancel]").addEventListener("click", close);
     dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); close(); });
   }
+
+  document.addEventListener("submit", (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (!form.closest("#tasks")) return;      // solo i bottoni delle righe
+    e.preventDefault();
+    fetch(form.action, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(new FormData(form)),
+    })
+      .then((r) => (r.ok ? refreshList() : location.reload()))
+      .catch(() => location.reload());
+  });
 
   document.addEventListener("click", (e) => {
     const expander = e.target.closest("[data-expand]");
