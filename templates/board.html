@@ -123,6 +123,20 @@
           {% if t.deleted_at %}
             <span class="pill gone">deleted {{ t.deleted_at.date().isoformat() }}</span>
           {% endif %}
+
+          {# Somebody who is not you moved this and you have not opened it since.
+             Labelled with the most recent one and who did it — on a list two
+             people share, the name is the useful half — with the rest in the
+             tooltip. It goes out when you open the panel, and only then. #}
+          {% set news = unseen.get(t.id) %}
+          {% if news %}
+            {% set last = news[0] %}
+            <span class="pill unseen"
+                  title="{% for e in news %}{{ e.actor.label if e.actor else 'someone' }} · {{ 'note' if e.type == 'note_added' else 'moved it' }} · {{ e.created_at.strftime('%d %b, %H:%M') }}{% if not loop.last %}&#10;{% endif %}{% endfor %}">
+              {{ last.actor.label if last.actor else 'someone' }} ·
+              {{ 'note' if last.type == 'note_added' else 'moved it' }}{% if news|length > 1 %} +{{ news|length - 1 }}{% endif %}
+            </span>
+          {% endif %}
         </div>
 
         <div class="meta linksrow">

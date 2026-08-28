@@ -37,8 +37,12 @@
         li.classList.remove("dragging");
         li.draggable = false;
         list.querySelectorAll(".task").forEach((x) => x.classList.remove("over"));
+        // Which row moved is known here for certain — it is the one just
+        // dropped — and nowhere else. Inferring it from the new array would
+        // catch every row that merely shifted up by one.
+        const movedId = Number(li.dataset.id);
         dragged = null;
-        save();
+        save(movedId);
       });
 
     li.addEventListener("dragover", (e) => {
@@ -90,12 +94,14 @@
       });
   }
 
-  function save() {
+  function save(movedId) {
     const ids = [...list.querySelectorAll(".task")].map((li) => Number(li.dataset.id));
     fetch(`/app/${list.dataset.ws}/order`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids, version: Number(list.dataset.version) }),
+      body: JSON.stringify({
+        ids, version: Number(list.dataset.version), moved_id: movedId ?? null,
+      }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(r)))
       .then((data) => {

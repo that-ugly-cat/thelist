@@ -331,6 +331,86 @@ def main_() -> int:
         check("...and outside #tasks, which the redraw wipes",
               r.text.index('id="toast"') > r.text.index('id="ordermsg"'))
 
+        print("\n— somebody else moved this, and I have not looked —")
+        # Asserted per row against the function itself. The page as a whole is
+        # the wrong instrument here: the editor wrote a note further up this
+        # file, so the owner's board legitimately carries other marks and
+        # "no pill anywhere" would be testing the fixture, not the rule.
+        from models import unseen_touches as unseen_
+        def unseen_for(email):
+            db_ = SessionLocal()
+            u = db_.query(User).filter(User.email == email).first()
+            w = db_.query(Workspace).get(ws_id)
+            out = {k: [e.type for e in v] for k, v in unseen_(db_, w, u).items()}
+            db_.close()
+            return out
+
+        # Deltas, not absolutes: both of them wrote on this row earlier in the
+        # file, so what is being asserted is what THIS note changes.
+        def marks(email):
+            return len(unseen_for(email).get(ids[0], []))
+
+        # Clear the slate for the owner so the arithmetic below is readable.
+        O.get(f"/app/{ws_id}/task/{ids[0]}")
+        before_o, before_e = marks("owner@example.org"), marks("editor@example.org")
+        check("opening it left the owner with nothing unseen there", before_o == 0,
+              str(before_o))
+
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/notes",
+               data={"body": "written by me, so not news to me"},
+               follow_redirects=False)
+        check("my own note does not mark my own row",
+              marks("owner@example.org") == before_o, str(marks("owner@example.org")))
+        check("...though it does mark it for the other person",
+              marks("editor@example.org") == before_e + 1)
+
+        E.post(f"/app/{ws_id}/tasks/{ids[0]}/notes",
+               data={"body": "written by the editor"}, follow_redirects=False)
+        check("somebody else's note marks it",
+              marks("owner@example.org") == before_o + 1)
+        check("...and not for the person who wrote it",
+              marks("editor@example.org") == before_e + 1)
+        r = O.get(f"/app/{ws_id}")
+        check("...and the pill names them", "pill unseen" in r.text and "Nikola" in r.text)
+
+        # Seen means opened, and nothing else does it.
+        r = O.get(f"/app/{ws_id}")
+        check("looking at the list does not clear it",
+              marks("owner@example.org") == before_o + 1)
+        O.get(f"/app/{ws_id}/task/{ids[0]}")
+        check("opening the panel clears it", marks("owner@example.org") == 0)
+
+        E.post(f"/app/{ws_id}/tasks/{ids[0]}/notes",
+               data={"body": "and again, after I had read"}, follow_redirects=False)
+        check("a later note marks it again",
+              ids[0] in unseen_for("owner@example.org"))
+        O.get(f"/app/{ws_id}/task/{ids[0]}")
+
+        # A reorder points at the row that was dragged and at no other.
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        order = [t.id for t in active_tasks(db, ws_).all()]
+        version = ws_.order_version
+        db.close()
+        moved = order[-1]
+        E.post(f"/app/{ws_id}/order",
+               json={"ids": [moved] + order[:-1], "version": version,
+                     "moved_id": moved})
+        db = SessionLocal()
+        ev = (db.query(Event).filter(Event.type == "reordered")
+                .order_by(Event.id.desc()).first())
+        db.close()
+        check("a reorder now points at the row that was dragged",
+              ev is not None and ev.task_id == moved, str(ev and ev.task_id))
+        mine = unseen_for("owner@example.org")
+        check("...and marks the dragged row", mine.get(moved) == ["reordered"])
+        check("...and no row that merely shifted beneath it",
+              [k for k, v in mine.items() if "reordered" in v] == [moved],
+              str(mine))
+        O.get(f"/app/{ws_id}/task/{moved}")
+        check("...cleared by opening it too",
+              moved not in unseen_for("owner@example.org"))
+
         print("\n— the archive holds two different exits —")
         # A row on its way out one way, another on its way out the other.
         O.post(f"/app/{ws_id}/tasks/{ids[1]}/done", follow_redirects=False)

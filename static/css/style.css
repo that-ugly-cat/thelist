@@ -245,6 +245,11 @@ table.report tr.self td:first-child { color: var(--accent-light); }
    colour; deleted is the one you have to be able to pick out of a list you are
    scrolling to find something to restore. */
 .pill.gone { border-color: var(--danger-border); background: var(--danger-bg); color: var(--danger); }
+/* Somebody else moved this and you have not looked since. Filled rather than
+   outlined, because unlike every other pill here this one is not a property of
+   the task — it is addressed to you, and it has to survive a glance down a list
+   of thirty rows. */
+.pill.unseen { border-color: var(--accent); background: var(--primary); color: var(--text); font-weight: 500; }
 
 /* ── a task opens in a modal, not a sidebar ── */
 dialog.taskmodal {

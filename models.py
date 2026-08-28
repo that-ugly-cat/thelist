@@ -372,6 +372,25 @@ class Mood(Base):
     __table_args__ = (UniqueConstraint("task_id", "user_id"),)
 
 
+class Seen(Base):
+    """When this person last opened this row. One per pair.
+
+    The board records who did what and when; the one thing it cannot know is
+    what you have already looked at. This is that, and nothing else.
+
+    Seen means **opened the panel**, so the mark clears by reading and never by
+    the clock: a row you never open keeps its mark indefinitely. That is the
+    point rather than a shortcoming — it is a *to read*, not a *happened
+    recently*, and a signal that expires on its own is one you learn to wait out.
+    """
+    __tablename__ = "seen"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    seen_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("task_id", "user_id"),)
+
+
 class Note(Base):
     """Append-only, and not out of laziness (SPEC.md §3.7).
 
@@ -794,7 +813,7 @@ def purge_task(db, task: Task) -> dict:
         "links": len(task.links), "contacts": len(task.contacts),
         "events_kept": db.query(Event).filter(Event.task_id == task.id).count(),
     }
-    for model in (Note, Earmark, Mood):
+    for model in (Note, Earmark, Mood, Seen):
         db.query(model).filter(model.task_id == task.id).delete(synchronize_session=False)
     # Before the row goes, or the foreign key is left pointing at nothing.
     db.query(Event).filter(Event.task_id == task.id).update(
@@ -811,7 +830,7 @@ def next_position(db, ws: Workspace) -> int:
 
 
 def apply_order(db, ws: Workspace, ordered_ids: list, expected_version: int,
-                actor=None) -> str:
+                actor=None, moved_id: int | None = None) -> str:
     """Rewrite the whole order in one transaction, or refuse.
 
     The client sends the complete array plus the `order_version` it read. With a
@@ -830,7 +849,16 @@ def apply_order(db, ws: Workspace, ordered_ids: list, expected_version: int,
     for i, tid in enumerate(ordered_ids, start=1):
         rows[tid].position = i
     ws.order_version += 1
-    log_event(db, ws.id, "reordered", actor=actor, count=len(ordered_ids))
+    # Attached to the row that was DRAGGED, which the browser knows for certain
+    # because it is the element it just dropped. Inferring it from the array
+    # would be worse than imprecise: dropping one row at the top shifts every
+    # row beneath it, so "changed position" is nearly the whole board and would
+    # mark it all. Only the dragged one is news.
+    #
+    # It stays in UNCOUNTED_EVENTS, so gaining a task_id moves no number in the
+    # report — what it gains is the ability to point at a card.
+    log_event(db, ws.id, "reordered", actor=actor, task=rows.get(moved_id),
+              count=len(ordered_ids))
     return "ok"
 
 
@@ -994,6 +1022,57 @@ def toggle_earmark(db, task: Task, user) -> bool:
         return True
     db.delete(row)
     return False
+
+
+# The two actions that count as "somebody moved this and it was not me".
+#
+# Deliberately not every edit: a note and a reordering change what the list
+# MEANS without changing the row's own text, which is exactly the pair you can
+# miss by looking. Widening this later is one tuple; widening it now would make
+# the mark so common it stops being read.
+TOUCHED_BY_OTHERS = ("note_added", "reordered")
+
+
+def unseen_touches(db, ws: Workspace, user) -> dict:
+    """task_id -> the events by other people this person has not opened since.
+
+    Newest first, so the caller can label the card with the most recent one and
+    keep the rest for the tooltip. A row with no Seen row at all counts every
+    such event: never opened is a stronger case of not seen, not an exception.
+    """
+    if user is None:
+        return {}
+    seen = dict(db.query(Seen.task_id, Seen.seen_at)
+                  .filter(Seen.user_id == user.id).all())
+    evs = (db.query(Event)
+             .filter(Event.workspace_id == ws.id,
+                     Event.task_id.isnot(None),
+                     Event.type.in_(TOUCHED_BY_OTHERS),
+                     Event.actor_user_id.isnot(None),
+                     Event.actor_user_id != user.id)
+             .order_by(Event.created_at.desc()).all())
+    out = {}
+    for ev in evs:
+        mark = seen.get(ev.task_id)
+        if mark is None or ev.created_at > mark:
+            out.setdefault(ev.task_id, []).append(ev)
+    return out
+
+
+def mark_seen(db, task: Task, user) -> None:
+    """Opening the panel is what "seen" means, so this is where it is recorded.
+
+    A GET with a side effect, like marking a mail read: naming it here rather
+    than pretending otherwise. Nothing is logged — noticing is not an event.
+    """
+    if user is None:
+        return
+    row = (db.query(Seen)
+             .filter(Seen.task_id == task.id, Seen.user_id == user.id).first())
+    if row is None:
+        db.add(Seen(task_id=task.id, user_id=user.id))
+    else:
+        row.seen_at = utcnow()
 
 
 def moods_of(db, ws: Workspace, user) -> dict:

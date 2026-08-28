@@ -47,7 +47,7 @@ from models import (
     NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
     active_tasks, add_contact, add_link, apply_order, archived_tasks,
-    earmarked_ids, moods_of, purge_task, set_mood,
+    earmarked_ids, mark_seen, moods_of, purge_task, set_mood, unseen_touches,
     toggle_earmark, ensure_one_admin, ensure_workspace,
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
@@ -486,6 +486,7 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
         db, acc, tasks=rows, view=view, tag=tag, person=person, archive=archive,
         people=people_of(db, ws), tags=tags_of(db, ws), self_id=self_person(db, ws).id,
         marked=marked, moods=moods_of(db, ws, acc.user), note_counts=note_counts,
+        unseen=unseen_touches(db, ws, acc.user),
         only_marked=bool(request.query_params.get("marked"))))
 
 
@@ -494,6 +495,10 @@ async def task_panel(request: Request, task_id: int,
                      acc: WorkspaceAccess = Depends(workspace_dep("editor")),
                      db: Session = Depends(get_db)):
     t = _visible_task(db, acc, task_id)
+    # Opening the panel IS what "seen" means, so it is recorded here — a GET with
+    # a side effect, like marking a mail read, named rather than hidden.
+    mark_seen(db, t, acc.user)
+    db.commit()
     # Newest first: on a task that has been going for weeks, the note you need is
     # the last one written, and scrolling past a month of history to reach it is
     # the kind of friction that stops people writing notes at all.
@@ -788,8 +793,12 @@ async def reorder(request: Request,
                   db: Session = Depends(get_db)):
     payload = await request.json()
     ids = [int(x) for x in payload.get("ids", [])]
+    try:
+        moved = int(payload.get("moved_id"))
+    except (TypeError, ValueError):
+        moved = None
     outcome = apply_order(db, acc.workspace, ids, int(payload.get("version", -1)),
-                          actor=acc.user)
+                          actor=acc.user, moved_id=moved)
     if outcome != "ok":
         db.rollback()
         return JSONResponse({"error": outcome}, status_code=409)
