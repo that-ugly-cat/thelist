@@ -227,13 +227,57 @@ def main_() -> int:
                    follow_redirects=False)
         check("an admin can", r.status_code == 302)
 
-        print("\n— the report counts what happened —")
+        print("\n— the report: what is carried, what closed, how often touched —")
         r = O.get(f"/app/{ws_id}/report?from=2000-01-01&to=2100-01-01")
         check("the report renders", r.status_code == 200)
         check("...and says it is not hours", "not hours" in r.text)
         r = O.get(f"/app/{ws_id}/report.csv?from=2000-01-01&to=2100-01-01")
         check("the CSV carries the weights",
               "weights" in r.text and "S=1" in r.text)
+        check("...and the three measures", "open weighted" in r.text
+              and "done weighted" in r.text and "touches" in r.text)
+
+        from datetime import datetime as dt
+        from models import EFFORT_WEIGHTS, Workspace, active_tasks
+        from models import report as report_
+
+        def snapshot():
+            db_ = SessionLocal()
+            ws_ = db_.query(Workspace).get(ws_id)
+            out = report_(db_, ws_, dt(2000, 1, 1), dt(2100, 1, 1))
+            live = sum(EFFORT_WEIGHTS[t.effort] for t in active_tasks(db_, ws_).all())
+            db_.close()
+            return out, live
+
+        d, live = snapshot()
+        check("open weighted is the live board, not the event log",
+              sum(x["open_w"] for x in d["people"]) == live, str(live))
+        check("a row's open count and its weight agree on emptiness",
+              all((x["open_n"] == 0) == (x["open_w"] == 0) for x in d["people"]))
+
+        for k in ("share_open", "share_touch", "share_done"):
+            tot = sum(x[k] for x in d["people"])
+            check(f"{k} adds up to a whole", abs(tot - 100) < 0.5 or tot == 0.0,
+                  str(tot))
+
+        # A note is work, so it moves touches and the share OF touches — that one
+        # is a frequency and is meant to move. What must not move is weight: if
+        # done or open ever shift on a note, writing buys standing.
+        before = {x["label"]: x for x in d["people"]}
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/notes",
+               data={"body": "a note, which is work and not weight"},
+               follow_redirects=False)
+        after, _ = snapshot()
+        moved = [x for x in after["people"]
+                 if x["label"] in before and before[x["label"]]["touches"] != x["touches"]]
+        check("a note moves touches", len(moved) == 1, str(len(moved)))
+        check("...and moves the share of touches with them",
+              all(before[x["label"]]["share_touch"] != x["share_touch"] for x in moved))
+        check("...but never done, open, or their shares",
+              all((before[x["label"]]["done_w"], before[x["label"]]["share_done"],
+                   before[x["label"]]["open_w"], before[x["label"]]["share_open"])
+                  == (x["done_w"], x["share_done"], x["open_w"], x["share_open"])
+                  for x in moved))
         r = E.get(f"/app/{ws_id}")
         check("on, the tab is back for a member too", "/report" in r.text)
 

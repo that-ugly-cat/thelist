@@ -778,45 +778,70 @@ def report(db, ws: Workspace, start: datetime, end: datetime) -> dict:
     that is VISIBLE. A weighted column on its own would have hidden exactly the
     case where the weight was never used.
     """
+    # Every event that happened TO A TASK, minus the creation.
+    #
+    # `task_id is not null` is not tidiness: `reordered`, `member_added` and
+    # `person_renamed` carry no task, therefore no snap_person_id, and without
+    # the filter they would all pile into the "Unassigned" bucket of every row.
+    #
+    # `created` is out because opening a row is not working on it, and a day
+    # spent filling the board would otherwise read as a day of work. What is
+    # left answers "how often was this come back to".
     evs = (db.query(Event)
              .filter(Event.workspace_id == ws.id,
                      Event.created_at >= start, Event.created_at < end,
-                     Event.type.in_(("created", "done")))
+                     Event.task_id.isnot(None),
+                     Event.type != "created")
              .all())
     people = {p.id: p for p in people_of(db, ws, include_archived=True)}
     tags = {t.name: t for t in tags_of(db, ws)}
 
     def blank():
-        return {"opened": 0, "closed": 0, "touches": 0, "weighted": 0, "listed": 0}
+        return {"open_w": 0, "open_n": 0, "done_w": 0, "done_n": 0, "touches": 0}
 
     by_person, by_tag = {}, {}
     for ev in evs:
-        w = EFFORT_WEIGHTS.get(ev.snap_effort or DEFAULT_EFFORT, EFFORT_WEIGHTS[DEFAULT_EFFORT])
         buckets = [by_person.setdefault(ev.snap_person_id, blank())]
         for name in ev.snap_tag_list:
             buckets.append(by_tag.setdefault(name, blank()))
+        # Weight comes off the snapshot, never off the live row: a task resized
+        # today must not resize what it was worth last quarter.
+        w = EFFORT_WEIGHTS.get(ev.snap_effort or DEFAULT_EFFORT, EFFORT_WEIGHTS[DEFAULT_EFFORT])
         for b in buckets:
-            if ev.type == "created":
-                b["opened"] += 1
-            else:
-                b["touches"] += 1
-                b["weighted"] += w
-                if not ev.data.get("recurring"):
-                    b["closed"] += 1
+            b["touches"] += 1
+            if ev.type == "done":
+                b["done_n"] += 1
+                b["done_w"] += w
 
+    # What is being carried is a fact in the present tense, so it reads the live
+    # effort — there is no event to snapshot for something that has not happened.
+    # Soft-deleted rows fall out here, which is right: a deleted row is off the
+    # list, while its past events stay counted above.
     for t in active_tasks(db, ws).all():
-        by_person.setdefault(t.for_person_id, blank())["listed"] += 1
-        for tag in t.tag_list:
-            by_tag.setdefault(tag.name, blank())["listed"] += 1
+        w = EFFORT_WEIGHTS.get(t.effort or DEFAULT_EFFORT, EFFORT_WEIGHTS[DEFAULT_EFFORT])
+        for b in (by_person.setdefault(t.for_person_id, blank()),
+                  *(by_tag.setdefault(tag.name, blank()) for tag in t.tag_list)):
+            b["open_n"] += 1
+            b["open_w"] += w
 
     def rows(buckets, resolve):
-        total = sum(b["weighted"] for b in buckets.values()) or 0
+        tot_open = sum(b["open_w"] for b in buckets.values())
+        tot_done = sum(b["done_w"] for b in buckets.values())
+        # Share of touches is a share of a COUNT, while the other two are shares
+        # of weight. It answers "who has been handling the rows", and it counts a
+        # note the same as a completion — which is the honest reading of a
+        # frequency and the wrong reading of an effort.
+        tot_touch = sum(b["touches"] for b in buckets.values())
         out = []
         for key, b in buckets.items():
             label, is_self = resolve(key)
             out.append({**b, "label": label, "is_self": is_self,
-                        "share": round(100 * b["weighted"] / total, 1) if total else 0.0})
-        out.sort(key=lambda r: (-r["weighted"], -r["listed"], r["label"].lower()))
+                        "share_open": round(100 * b["open_w"] / tot_open, 1) if tot_open else 0.0,
+                        "share_touch": round(100 * b["touches"] / tot_touch, 1) if tot_touch else 0.0,
+                        "share_done": round(100 * b["done_w"] / tot_done, 1) if tot_done else 0.0})
+        # Carried first: the question the table opens on is who this list is for
+        # right now, not who closed most last quarter.
+        out.sort(key=lambda r: (-r["open_w"], -r["done_w"], -r["touches"], r["label"].lower()))
         return out
 
     def person_label(pid):

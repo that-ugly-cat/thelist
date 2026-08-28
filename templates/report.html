@@ -14,13 +14,24 @@
    number left alone gets read as one. #}
 <p class="note">
   <strong>These are counts, not hours.</strong>
-  <em>Touches</em> are completions in the period, recurring tasks included — a
-  recurring task done eleven times counts eleven, which is why it beats counting
-  tasks. <em>Weighted</em> multiplies each by its declared size
-  ({% for e, w in data.weights.items() %}{{ e }}&nbsp;=&nbsp;{{ w }}{% if not loop.last %}, {% endif %}{% endfor %}),
-  which separates the chapter from the website update — and is still not time.
-  While nobody touches the size menu the weighted column is just the raw one
-  times three, and you can see it here.
+  <em>Open</em> is what is on the list right now and <em>done</em> is what closed
+  in the period, both weighted by declared size
+  ({% for e, w in data.weights.items() %}{{ e }}&nbsp;=&nbsp;{{ w }}{% if not loop.last %}, {% endif %}{% endfor %}) —
+  which separates the chapter from the website update, and is still not time. The
+  small grey figure is the plain row count behind each: while nobody touches the
+  size menu it is exactly the weighted one divided by three, and you can see that
+  here. <em>Touches</em> counts operations on a task — notes, edits, completions,
+  reopenings — and never the act of creating it, so a day spent filling the board
+  does not read as a day of work.
+</p>
+<p class="note">
+  <strong>The three shares are not the same kind of number.</strong> Share of open
+  and share of done divide weight, so a large task counts for eight small ones.
+  Share of touches divides a plain count, and it counts a note exactly like a
+  completion — which is the right reading of <em>how often somebody handled these
+  rows</em> and the wrong reading of how much they did. It is also the one figure
+  here that goes up by writing more, so read it as frequency and never as effort;
+  the other two are untouched by it.
 </p>
 
 {% macro table(rows, what) %}
@@ -29,18 +40,28 @@
   {% else %}
   <table class="report">
     <thead>
-      <tr><th>{{ what }}</th><th>on the list</th><th>opened</th><th>closed</th>
-          <th>touches</th><th>weighted</th><th>share</th></tr>
+      <tr><th>{{ what }}</th><th>open</th><th>share of open</th>
+          <th>touches</th><th>share of touches</th>
+          <th>done</th><th>share of done</th></tr>
     </thead>
     <tbody>
     {% for r in rows %}
       <tr class="{% if r.is_self %}self{% endif %}">
         <td>{{ r.label }}{% if r.is_self %} <span class="muted small">(you)</span>{% endif %}</td>
-        <td>{{ r.listed }}</td><td>{{ r.opened }}</td><td>{{ r.closed }}</td>
-        <td>{{ r.touches }}</td><td>{{ r.weighted }}</td>
+        <td>{{ r.open_w }} <span class="muted small">{{ r.open_n }}</span></td>
         <td>
-          <span class="bar" style="--w: {{ r.share }}%"></span>
-          <span class="pct">{{ r.share }}%</span>
+          <span class="bar" style="--w: {{ r.share_open }}%"></span>
+          <span class="pct">{{ r.share_open }}%</span>
+        </td>
+        <td>{{ r.touches }}</td>
+        <td>
+          <span class="bar" style="--w: {{ r.share_touch }}%"></span>
+          <span class="pct">{{ r.share_touch }}%</span>
+        </td>
+        <td>{{ r.done_w }} <span class="muted small">{{ r.done_n }}</span></td>
+        <td>
+          <span class="bar" style="--w: {{ r.share_done }}%"></span>
+          <span class="pct">{{ r.share_done }}%</span>
         </td>
       </tr>
     {% endfor %}

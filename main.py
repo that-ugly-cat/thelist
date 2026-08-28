@@ -895,11 +895,13 @@ async def report_csv(request: Request,
     w.writerow([])
     for section in ("people", "tags"):
         w.writerow([section])
-        w.writerow(["label", "on the list", "opened", "closed", "touches",
-                    "weighted", "share %"])
+        w.writerow(["label", "open weighted", "open rows", "share of open %",
+                    "touches", "share of touches %",
+                    "done weighted", "done rows", "share of done %"])
         for r in data[section]:
-            w.writerow([r["label"], r["listed"], r["opened"], r["closed"],
-                        r["touches"], r["weighted"], r["share"]])
+            w.writerow([r["label"], r["open_w"], r["open_n"], r["share_open"],
+                        r["touches"], r["share_touch"],
+                        r["done_w"], r["done_n"], r["share_done"]])
         w.writerow([])
     return Response(buf.getvalue(), media_type="text/csv", headers={
         "Content-Disposition": f'attachment; filename="thelist-{start:%Y%m%d}-{end:%Y%m%d}.csv"'})
