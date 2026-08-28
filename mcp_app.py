@@ -32,8 +32,9 @@ from mcp.server.mcpserver import MCPServer
 import auth
 import mailer
 from models import (
-    DEFAULT_EFFORT, EFFORTS, EFFORT_WEIGHTS, STATUS_LABELS, Link, Membership,
-    Note, SessionLocal, Task, User, Workspace, active_tasks, add_link,
+    DEFAULT_EFFORT, EFFORTS, EFFORT_WEIGHTS, STATUS_LABELS, Contact, Link,
+    Membership,
+    Note, SessionLocal, Task, User, Workspace, active_tasks, add_contact, add_link,
     get_or_create_person, has_role, log_event, mark_done, next_position,
     people_of, person_for_proposal, reopen, report, role_for, self_person,
     set_tags, tags_of, utcnow, workspaces_of,
@@ -148,6 +149,8 @@ def _brief(db, t: Task) -> dict:
                                        Note.deleted_at.is_(None)).count(),
         "links": [{"id": l.id, "url": l.url, "label": l.label or None}
                   for l in t.links],
+        "contacts": [{"id": c.id, "name": c.name or None, "email": c.email or None,
+                      "reason": c.reason or None} for c in t.contacts],
     }
 
 
@@ -801,6 +804,59 @@ def remove_task_link(link_id: int, board: str = "") -> dict:
             return _fail("link not found")
         task = link.task_id
         db.delete(link)
+        db.commit()
+        return {"removed": True, "task_id": task}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def add_task_contact(task_id: int, name: str = "", email: str = "",
+                     reason: str = "", board: str = "") -> dict:
+    """Note somebody to talk to about this task. Owner only.
+
+    **Not the same thing as `for_person`**, and confusing the two would spoil the
+    report: `for` says on whose behalf the task exists and is counted; a contact
+    is who you have to write to — the secretary holding the room booking, the
+    co-author who owes a paragraph. Neither implies the other.
+
+    A name or an address is required; `reason` is optional and is the part worth
+    writing, because it is what makes the entry useful six weeks later.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        c = add_contact(db, t, name, email, reason)
+        if c is None:
+            return _fail("a contact needs a name or an address")
+        log_event(db, ws.id, "edited", actor=user, task=t,
+                  added_contact=c.label, via="mcp")
+        db.commit()
+        return {"added": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def remove_task_contact(contact_id: int, board: str = "") -> dict:
+    """Take one contact off a task. Owner only."""
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        c = (db.query(Contact).join(Task, Task.id == Contact.task_id)
+               .filter(Contact.id == contact_id,
+                       Task.workspace_id == ws.id).first())
+        if c is None:
+            return _fail("contact not found")
+        task = c.task_id
+        db.delete(c)
         db.commit()
         return {"removed": True, "task_id": task}
     finally:

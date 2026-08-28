@@ -203,21 +203,49 @@ table.report tr.self td:first-child { color: var(--accent-light); }
 .cta { margin: 40px 0 8px; }
 .foot { margin-top: 48px; }
 
-/* ── the description expander on a row ── */
-.task .titleline { display: flex; align-items: baseline; gap: 8px; }
-.twist {
-  background: none; border: none; color: var(--muted-3); cursor: pointer;
-  font-size: 15px; line-height: 1; padding: 0; width: 12px;
-  transition: transform .12s ease, color .12s ease;
+/* ── the description under the title: two lines, then all of it ── */
+.descbox { margin: 6px 0 8px; }
+.desclabel {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--muted-3); font: inherit; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .05em;
 }
-.twist:hover { color: var(--accent-light); }
-.twist.open { transform: rotate(90deg); color: var(--muted); }
-.twist.off { cursor: default; }
+.desclabel:hover, .desclabel.open { color: var(--accent-light); }
 .task .desc {
-  margin: 8px 0 2px 20px; padding-left: 10px;
+  margin: 2px 0 0; padding-left: 10px;
   border-left: 2px solid var(--border);
   color: var(--muted); font-size: 14px; white-space: pre-wrap;
 }
+/* Clamped, not hidden: two lines are readable without asking for them, and an
+   expander you have to discover is a description nobody reads. */
+.task .desc.clamped {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── one row of pills per kind ── */
+.meta.when, .meta.tagsrow, .meta.sizerow { margin-top: 4px; }
+.meta.when:empty, .meta.tagsrow:empty, .meta.sizerow:empty { display: none; }
+.pill.contact { border-color: var(--muted-3); }
+
+/* ── a task opens in a modal, not a sidebar ── */
+dialog.taskmodal {
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  width: min(880px, 94vw); max-height: 88vh; padding: 0; overflow: auto;
+}
+dialog.taskmodal::backdrop { background: rgba(0, 0, 0, .6); }
+dialog.taskmodal .panelbody { padding: 24px 28px 28px; }
+dialog.taskmodal .row { grid-template-columns: 1fr 1fr; }
+
+/* ── contacts ── */
+.contacts { list-style: none; margin: 0 0 8px; padding: 0; }
+.contacts li {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border);
+}
+.contacts li form { margin: 0; }
+.contactform { margin-top: 8px; }
 
 /* ── links on a task ── */
 .links { list-style: none; margin: 0 0 8px; padding: 0; }

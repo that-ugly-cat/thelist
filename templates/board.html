@@ -44,54 +44,60 @@
     <p class="empty">{% if archive %}Nothing archived yet.{% else %}Nothing on the list.{% endif %}</p>
   {% endif %}
 
+  {% set sortable = view == 'list' and not archive and not tag and not person %}
   <ul class="tasks" id="tasks" data-ws="{{ ws.id }}" data-version="{{ ws.order_version }}"
-      data-sortable="{{ 1 if (view == 'list' and not archive and not tag and not person) else 0 }}">
+      data-sortable="{{ 1 if sortable else 0 }}">
     {% for t in tasks %}
+    {# The row is NOT draggable in the markup. The handle turns it on for the
+       length of one drag — see list.js. A permanently draggable row swallows the
+       clicks and the text selection of everything inside it, on some browsers
+       silently, which is how the description expander came to "not work". #}
     <li class="task" id="task-{{ t.id }}" data-id="{{ t.id }}">
-      {% if view == 'list' and not archive and not tag and not person %}
-        <span class="grip" title="Drag to reorder">⠿</span>
-      {% else %}
-        <span class="grip off" title="Reordering only works on the unfiltered list">⠿</span>
-      {% endif %}
+      <span class="grip {% if not sortable %}off{% endif %}"
+            title="{% if sortable %}Drag to reorder{% else %}Reordering only works on the unfiltered list{% endif %}">⠿</span>
 
       <div class="body">
-        <div class="titleline">
-          {# The expander is a button and not a <details>: the row is draggable,
-             and a summary inside a draggable element is where browsers disagree
-             with each other. It is only drawn when there is something under it,
-             so an empty chevron never promises a description that is not there. #}
-          {% if t.description %}
-            <button class="twist" type="button" data-expand="desc-{{ t.id }}"
-                    aria-expanded="false" title="Show the description">›</button>
-          {% else %}
-            <span class="twist off"></span>
-          {% endif %}
-          <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
-        </div>
-        <div class="meta">
-          {% if t.for_person_id != self_id and t.person %}
-            <span class="pill who">for {{ t.person.display_name }}</span>
-          {% endif %}
-          {% for tag in t.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
-          <span class="pill effort e{{ t.effort }}" title="{{ EFFORT_LABELS[t.effort] }} — weight {{ EFFORT_WEIGHTS[t.effort] }}">{{ t.effort }}</span>
-          {% if t.recurring %}<span class="pill rec" title="Recurring: completing it keeps it on the list">↻</span>{% endif %}
+        <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
+
+        {% if t.description %}
+          <div class="descbox">
+            <button class="desclabel" type="button" data-expand>description</button>
+            <div class="desc clamped">{{ t.description }}</div>
+          </div>
+        {% endif %}
+
+        {# One row per kind, so the eye goes straight to the one it wants instead
+           of reading a hedge of pills in mixed order. #}
+        <div class="meta when">
           {% if t.due_date %}
             {% set left = (t.due_date - today()).days %}
-            <span class="pill due {% if left < 0 %}late{% elif left <= 7 %}soon{% endif %}">
-              {{ t.due_date.isoformat() }}
-            </span>
+            <span class="pill due {% if left < 0 %}late{% elif left <= 7 %}soon{% endif %}">due {{ t.due_date.isoformat() }}</span>
           {% endif %}
+          {% if t.recurring %}<span class="pill rec" title="Recurring: completing it keeps it on the list">↻ recurring</span>{% endif %}
           {% if t.recurring and t.last_done_at %}
             <span class="muted small">last done {{ t.last_done_at.date().isoformat() }}</span>
           {% endif %}
           {% if t.done_at %}<span class="muted small">done {{ t.done_at.date().isoformat() }}</span>{% endif %}
+        </div>
+
+        {% if t.tag_list %}
+          <div class="meta tagsrow">
+            {% for tag in t.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="meta sizerow">
+          <span class="pill effort e{{ t.effort }}" title="{{ EFFORT_LABELS[t.effort] }} — weight {{ EFFORT_WEIGHTS[t.effort] }}">{{ t.effort }}</span>
+          {% if t.for_person_id != self_id and t.person %}
+            <span class="pill who">for {{ t.person.display_name }}</span>
+          {% endif %}
           {% for l in t.links %}
             <a class="pill link" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.text }}</a>
           {% endfor %}
+          {% if t.contacts %}
+            <span class="pill contact" title="{% for c in t.contacts %}{{ c.label }}{% if not loop.last %}, {% endif %}{% endfor %}">✉ {{ t.contacts|length }}</span>
+          {% endif %}
         </div>
-        {% if t.description %}
-          <div class="desc hidden" id="desc-{{ t.id }}">{{ t.description }}</div>
-        {% endif %}
       </div>
 
       <div class="actions">
@@ -120,7 +126,7 @@
   </p>
 </div>
 
-<aside id="panel" class="panel">
+<aside class="panel">
   <div class="panelbody">
     <h2>{% if is_owner %}Add to the list{% else %}Propose a task{% endif %}</h2>
     {% if not is_owner %}
@@ -128,8 +134,14 @@
     {% endif %}
     <form method="post" action="/app/{{ ws.id }}/tasks" class="taskform">
       <label>Title <input name="title" required maxlength="200"></label>
+      {# Filled in rather than hinted: on your own board the answer is you, and
+         proposing on somebody else's it is you again. It stays a field because
+         it answers "for whom does this exist", and the honest answer is
+         sometimes a third person who asked for it — which is the whole reason
+         the report can tell your work from theirs. #}
       <label>For
-        <input name="for_person" list="people" placeholder="{{ ws.owner.label if is_owner else user.label }}">
+        <input name="for_person" list="people"
+               value="{{ ws.owner.label if is_owner else user.label }}">
       </label>
       <label>Tags <input name="tags" list="tagnames" placeholder="project X, lab Y"></label>
       <div class="row">
@@ -146,7 +158,7 @@
         <label>Link <input name="link_url" placeholder="https://…"></label>
         <label>Label <input name="link_label" placeholder="PaperTrail"></label>
       </div>
-      <p class="muted small">One link here; add the others from the task itself.</p>
+      <p class="muted small">One link here; more links and contacts from the task itself.</p>
       <button class="btn" type="submit">{% if is_owner %}Add{% else %}Propose{% endif %}</button>
     </form>
   </div>

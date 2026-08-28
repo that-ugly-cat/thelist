@@ -244,6 +244,8 @@ class Task(Base):
     tags = relationship("TaskTag", cascade="all, delete-orphan")
     links = relationship("Link", cascade="all, delete-orphan",
                          order_by="Link.position, Link.id")
+    contacts = relationship("Contact", cascade="all, delete-orphan",
+                            order_by="Contact.position, Contact.id")
 
     @property
     def tag_list(self):
@@ -276,6 +278,29 @@ class Link(Base):
             return self.label.strip()
         bare = (self.url or "").split("://", 1)[-1]
         return bare[:32] + ("…" if len(bare) > 32 else "")
+
+
+class Contact(Base):
+    """Somebody to talk to about this task, and why.
+
+    Not a `Person`: those answer *for whom does this row exist* and are counted
+    in the report. These answer *who do I have to write to* — the secretary who
+    holds the room booking, the co-author who owes a paragraph. Putting them in
+    the same table would have made the report count people who never asked for
+    anything.
+    """
+    __tablename__ = "contacts"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    name = Column(String, default="", nullable=False)
+    email = Column(String, default="", nullable=False)
+    reason = Column(String, default="", nullable=False)
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+
+    @property
+    def label(self) -> str:
+        return (self.name or "").strip() or (self.email or "").strip() or "someone"
 
 
 class Note(Base):
@@ -812,6 +837,21 @@ def migrate_links(db) -> int:
             moved += 1
         t.link_url, t.link_label = "", ""
     return moved
+
+
+def add_contact(db, task: Task, name: str, email: str = "",
+                reason: str = "") -> Contact | None:
+    """A contact needs a name or an address; the reason is what makes it useful
+    six weeks later, and it is optional because forcing it would get it filled
+    with a full stop."""
+    name, email = (name or "").strip(), (email or "").strip()
+    if not name and not email:
+        return None
+    top = max([c.position for c in task.contacts], default=0)
+    c = Contact(name=name, email=email, reason=(reason or "").strip(),
+                position=top + 1)
+    task.contacts.append(c)
+    return c
 
 
 def add_link(db, task: Task, url: str, label: str = "") -> Link | None:

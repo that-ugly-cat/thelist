@@ -297,6 +297,35 @@ def main_() -> int:
               == ["https://example.org/second"])
         db.close()
 
+        print("\n— relevant contacts, which are not the person it is for —")
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/contacts",
+                   data={"name": "Anna", "email": "anna@example.org",
+                         "reason": "holds the room booking"}, follow_redirects=False)
+        check("the owner can add a contact", r.status_code == 302)
+        db = SessionLocal()
+        t = db.query(Task).get(linked_id)
+        check("with name, address and reason",
+              t.contacts[0].name == "Anna" and t.contacts[0].reason.startswith("holds"))
+        check("a contact does not change who the task is for",
+              t.person.display_name == "Spit", t.person.display_name)
+        contact_id = t.contacts[0].id
+        db.close()
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/contacts",
+                   data={"reason": "no name, no address"}, follow_redirects=False)
+        check("a contact with neither name nor address is refused",
+              r.status_code == 400, str(r.status_code))
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/contacts",
+                   data={"email": "only@example.org"}, follow_redirects=False)
+        check("an address alone is enough", r.status_code == 302)
+        r = E.post(f"/app/{ws_id}/tasks/{linked_id}/contacts", data={"name": "X"},
+                   follow_redirects=False)
+        check("an editor cannot add contacts", r.status_code == 404)
+        r = O.post(f"/app/{ws_id}/contacts/{contact_id}/delete", follow_redirects=False)
+        check("...and one can be removed", r.status_code == 302)
+        db = SessionLocal()
+        check("leaving the other", len(db.query(Task).get(linked_id).contacts) == 1)
+        db.close()
+
         print("\n— the owner is a person with a name, not 'Me' —")
         from models import Person, self_person, Workspace as _WS
         db = SessionLocal()

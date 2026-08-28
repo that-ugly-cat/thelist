@@ -41,9 +41,10 @@ from auth import (
 from models import (
     DEFAULT_EFFORT, EFFORTS, EFFORT_LABELS, EFFORT_WEIGHTS, NOTIFICATIONS,
     NOTIFICATION_LABELS, ROLE_LABELS, STATUS_LABELS,
-    ApiKey, Event, Invitation, Link, Membership, Note, NotificationPref, Person,
+    ApiKey, Contact, Event, Invitation, Link, Membership, Note,
+    NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
-    active_tasks, add_link, apply_order, ensure_one_admin, ensure_workspace,
+    active_tasks, add_contact, add_link, apply_order, ensure_one_admin, ensure_workspace,
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
     normalise, people_of, person_for_proposal, reopen, report, role_for,
@@ -600,6 +601,35 @@ async def delete_task_link(link_id: int,
         raise HTTPException(status_code=404, detail="Not found")
     task_id = link.task_id
     db.delete(link)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}#task-{task_id}", status_code=302)
+
+
+@app.post("/app/{workspace_id}/tasks/{task_id}/contacts")
+async def add_task_contact(task_id: int, name: str = Form(""), email: str = Form(""),
+                           reason: str = Form(""),
+                           acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                           db: Session = Depends(get_db)):
+    t = _visible_task(db, acc, task_id)
+    if add_contact(db, t, name, email, reason) is None:
+        raise HTTPException(status_code=400, detail="A contact needs a name or an address.")
+    log_event(db, acc.workspace.id, "edited", actor=acc.user, task=t,
+              added_contact=name or email)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}#task-{t.id}", status_code=302)
+
+
+@app.post("/app/{workspace_id}/contacts/{contact_id}/delete")
+async def delete_task_contact(contact_id: int,
+                              acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                              db: Session = Depends(get_db)):
+    c = (db.query(Contact).join(Task, Task.id == Contact.task_id)
+           .filter(Contact.id == contact_id,
+                   Task.workspace_id == acc.workspace.id).first())
+    if c is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    task_id = c.task_id
+    db.delete(c)
     db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}#task-{task_id}", status_code=302)
 

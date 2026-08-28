@@ -78,11 +78,44 @@
     </form>
   {% endif %}
 
+  <h3>Relevant contacts</h3>
+  {% if not task.contacts %}
+    <p class="muted small">
+      None. These are people to talk to about this — not who the task is for.
+    </p>
+  {% endif %}
+  <ul class="contacts">
+    {% for c in task.contacts %}
+      <li>
+        <div>
+          <strong>{{ c.name or '—' }}</strong>
+          {% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}
+          {% if c.reason %}<div class="muted small">{{ c.reason }}</div>{% endif %}
+        </div>
+        {% if is_owner %}
+          <form method="post" action="/app/{{ ws.id }}/contacts/{{ c.id }}/delete">
+            <button class="mini danger" title="Remove this contact">×</button>
+          </form>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% if is_owner %}
+    <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}/contacts" class="contactform">
+      <div class="row">
+        <label>Name <input name="name" placeholder="who"></label>
+        <label>Email <input type="email" name="email" placeholder="them@example.org"></label>
+      </div>
+      <label>Reason <input name="reason" placeholder="what they have to do with this"></label>
+      <button class="btn small">Add contact</button>
+    </form>
+  {% endif %}
+
   {% if is_owner %}
     <h3>Edit</h3>
     <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}" class="taskform">
       <label>Title <input name="title" value="{{ task.title }}" required></label>
-      <label>For <input name="for_person" list="people" value="{{ task.person.display_name if task.person else '' }}"></label>
+      <label>For <input name="for_person" list="people" value="{{ task.person.display_name if task.person else ws.owner.label }}"></label>
       <label>Tags <input name="tags" list="tagnames" placeholder="project X, lab Y" value="{{ task.tag_list | map(attribute='display_name') | join(', ') }}"></label>
       <div class="row">
         <label>Size
