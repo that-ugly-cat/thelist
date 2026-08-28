@@ -352,6 +352,25 @@
         });
       return;
     }
+    const face = e.target.closest("[data-mood]");
+    if (face) {
+      e.preventDefault();
+      const body = new FormData();
+      body.append("value", face.dataset.value);
+      fetch(face.dataset.mood, { method: "POST", body })
+        .then((r) => r.json())
+        .then((d) => {
+          // The server answers with what is in force, not with what was asked:
+          // pressing the lit face clears it, so the reply can be null and the
+          // group has to be redrawn from the answer rather than toggled blind.
+          face.closest(".moods").querySelectorAll(".mood").forEach((b) => {
+            const on = d.value !== null && String(d.value) === b.dataset.value;
+            b.classList.toggle("on", on);
+            b.setAttribute("aria-pressed", String(on));
+          });
+        });
+      return;
+    }
     const opener2 = e.target.closest("[data-open]");
     if (opener2) {
       e.preventDefault();

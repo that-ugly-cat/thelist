@@ -284,6 +284,43 @@ def main_() -> int:
         # Left ON for the rest of the run, so the checks below that touch the
         # board keep exercising the page they always exercised.
 
+        print("\n— the three faces: private, and never counted —")
+        from models import Event, Mood
+        r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "-1"})
+        check("a face can be set", r.json()["value"] == -1, str(r.json()))
+        r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "1"})
+        check("...and changed", r.json()["value"] == 1)
+        r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "1"})
+        check("...and pressing the lit one clears it", r.json()["value"] is None)
+        r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "7"})
+        check("an unknown value does not stick", r.json()["value"] is None)
+
+        # The whole reason this exists outside the event log.
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        before_t = {x["label"]: x["touches"] for x in
+                    report_(db, ws_, dt(2000, 1, 1), dt(2100, 1, 1))["people"]}
+        db.close()
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "-1"})
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        after_t = {x["label"]: x["touches"] for x in
+                   report_(db, ws_, dt(2000, 1, 1), dt(2100, 1, 1))["people"]}
+        n_ev = db.query(Event).filter(Event.type.like("%mood%")).count()
+        db.close()
+        check("a face is not a touch", before_t == after_t, str(after_t))
+        check("...and writes no event at all", n_ev == 0, str(n_ev))
+
+        # Per person, exactly like the earmark.
+        E.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "1"})
+        db = SessionLocal()
+        vals = sorted(m.value for m in db.query(Mood).filter(Mood.task_id == ids[0]).all())
+        db.close()
+        check("two people hold two different faces on one row", vals == [-1, 1], str(vals))
+        r = E.get(f"/app/{ws_id}")
+        check("...and a board never shows somebody else's",
+              r.text.count('class="mood on"') <= len(ids))
+
         print("\n— notes are append-only —")
         db = SessionLocal()
         from models import Note

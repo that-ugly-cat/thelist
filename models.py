@@ -78,6 +78,14 @@ EFFORT_WEIGHTS = {"S": 1, "M": 3, "L": 8}
 EFFORT_LABELS = {"S": "Small", "M": "Medium", "L": "Large"}
 DEFAULT_EFFORT = "M"
 
+# Three, in the order they are drawn. Not a 1-to-5: three is what you can answer
+# without thinking, and thinking about it is how a marker like this falls out of
+# use. See the Mood model for why it is never counted.
+MOOD_VALUES = (-1, 0, 1)
+MOOD_FACES = {-1: "🙁", 0: "😐", 1: "🙂"}
+MOOD_LABELS = {-1: "This one costs me", 0: "Neither here nor there",
+               1: "Glad this is mine"}
+
 EVENT_TYPES = [
     "created", "proposed", "accepted", "rejected", "edited", "reordered",
     "done", "reopened", "note_added", "deleted", "restored",
@@ -320,6 +328,32 @@ class Earmark(Base):
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("task_id", "user_id"),)
+
+
+class Mood(Base):
+    """How a row makes you feel. One per person, three values, nothing else.
+
+    It inherits Earmark's two negative properties and needs them more, not less:
+    **it is not a permission**, and **it does not go into the event log**, so it
+    never becomes a touch and never reaches the report.
+
+    That second one is the whole design. This board is read by the people the
+    work is for; a feeling that gets counted stops being a feeling and becomes a
+    performance, and "which tasks make Spit unhappy" is not a column anybody's
+    head of institute should be handed. Private, uncounted, and cheap to change
+    your mind about — the same thumb-on-a-page as the earmark, about a different
+    question.
+
+    Values are -1 / 0 / 1 and not a 1-to-5: three is what you can answer without
+    thinking, and thinking about it is how a marker like this stops being used.
+    """
+    __tablename__ = "moods"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    value = Column(Integer, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     __table_args__ = (UniqueConstraint("task_id", "user_id"),)
 
 
@@ -903,6 +937,36 @@ def toggle_earmark(db, task: Task, user) -> bool:
         return True
     db.delete(row)
     return False
+
+
+def moods_of(db, ws: Workspace, user) -> dict:
+    """task_id -> value, for this person only. Never anybody else's."""
+    if user is None:
+        return {}
+    rows = (db.query(Mood.task_id, Mood.value)
+              .join(Task, Task.id == Mood.task_id)
+              .filter(Task.workspace_id == ws.id, Mood.user_id == user.id).all())
+    return {tid: val for tid, val in rows}
+
+
+def set_mood(db, task: Task, user, value) -> int | None:
+    """Set, change or clear it; returns what is in force now. No event logged.
+
+    Pressing the face already lit clears it, so the three buttons are also the
+    way out. Without that, a mood set by mistake would be permanent and the
+    honest answer — *no strong feeling* — would be the only one unreachable.
+    """
+    row = (db.query(Mood)
+             .filter(Mood.task_id == task.id, Mood.user_id == user.id).first())
+    if value not in MOOD_VALUES or (row is not None and row.value == value):
+        if row is not None:
+            db.delete(row)
+        return None
+    if row is None:
+        db.add(Mood(task_id=task.id, user_id=user.id, value=value))
+    else:
+        row.value = value
+    return value
 
 
 def add_contact(db, task: Task, name: str, email: str = "",

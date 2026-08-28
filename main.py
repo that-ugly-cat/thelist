@@ -40,11 +40,13 @@ from auth import (
 )
 from models import (
     DEFAULT_EFFORT, EFFORTS, EFFORT_LABELS, EFFORT_WEIGHTS, NOTIFICATIONS,
+    MOOD_FACES, MOOD_LABELS, MOOD_VALUES,
     NOTIFICATION_LABELS, ROLE_LABELS, STATUS_LABELS,
     ApiKey, Contact, Earmark, Event, Invitation, Link, Membership, Note,
     NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
     active_tasks, add_contact, add_link, apply_order, earmarked_ids,
+    moods_of, set_mood,
     toggle_earmark, ensure_one_admin, ensure_workspace,
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
@@ -183,6 +185,7 @@ templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.globals.update(
     ASSETS=_asset_version(),
     EFFORTS=EFFORTS, EFFORT_LABELS=EFFORT_LABELS, EFFORT_WEIGHTS=EFFORT_WEIGHTS,
+    MOOD_FACES=MOOD_FACES, MOOD_LABELS=MOOD_LABELS, MOOD_VALUES=MOOD_VALUES,
     STATUS_LABELS=STATUS_LABELS, ROLE_LABELS=ROLE_LABELS,
     NOTIFICATION_LABELS=NOTIFICATION_LABELS, NOTIFICATIONS=NOTIFICATIONS,
     today=date.today,
@@ -475,7 +478,8 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
     return templates.TemplateResponse(request, "board.html", _ctx(
         db, acc, tasks=rows, view=view, tag=tag, person=person, archive=archive,
         people=people_of(db, ws), tags=tags_of(db, ws), self_id=self_person(db, ws).id,
-        marked=marked, only_marked=bool(request.query_params.get("marked"))))
+        marked=marked, moods=moods_of(db, ws, acc.user),
+        only_marked=bool(request.query_params.get("marked"))))
 
 
 @app.get("/app/{workspace_id}/task/{task_id}", response_class=HTMLResponse)
@@ -728,6 +732,27 @@ async def earmark(task_id: int, acc: WorkspaceAccess = Depends(workspace_dep("ed
     on = toggle_earmark(db, t, acc.user)
     db.commit()
     return {"on": on}
+
+
+@app.post("/app/{workspace_id}/tasks/{task_id}/mood")
+async def mood(task_id: int, request: Request,
+               acc: WorkspaceAccess = Depends(workspace_dep("editor")),
+               db: Session = Depends(get_db)):
+    """Set, change or clear how this row makes you feel. **No event is logged.**
+
+    Same omission as the earmark, and here it is load-bearing: an event would
+    make this a touch, a touch reaches the report, and the report is read by the
+    people the work is for. Pressing the face already lit clears it.
+    """
+    t = _visible_task(db, acc, task_id)
+    form = dict(await request.form())
+    try:
+        value = int(form.get("value", ""))
+    except (TypeError, ValueError):
+        value = None
+    now = set_mood(db, t, acc.user, value)
+    db.commit()
+    return {"value": now}
 
 
 @app.post("/app/{workspace_id}/order")

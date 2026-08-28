@@ -71,7 +71,18 @@
               title="Earmark — only you see this" aria-pressed="{{ 'true' if t.id in marked else 'false' }}">●</button>
 
       <div class="body">
-        <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
+        {# Everything that identifies the row sits on the title line: what it
+           belongs to before the name, how big it is and whose it is after. What
+           is left below is only what changes over time — dates, links, people to
+           write to. The eye stops once instead of three times. #}
+        <div class="titleline">
+          {% for tag in t.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
+          <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
+          <span class="pill effort e{{ t.effort }}" title="{{ EFFORT_LABELS[t.effort] }} — weight {{ EFFORT_WEIGHTS[t.effort] }}">{{ t.effort }}</span>
+          {% if t.for_person_id != self_id and t.person %}
+            <span class="pill who">for {{ t.person.display_name }}</span>
+          {% endif %}
+        </div>
 
         {% if t.description %}
           {# Cut on characters, not on rendered lines: a line depends on the
@@ -93,8 +104,8 @@
           </div>
         {% endif %}
 
-        {# One row per kind, so the eye goes straight to the one it wants instead
-           of reading a hedge of pills in mixed order. #}
+        {# What is left below the title is the changing part: when it is due,
+           where it points, who to write to. #}
         <div class="meta when">
           {% if t.due_date %}
             {% set left = (t.due_date - today()).days %}
@@ -107,17 +118,7 @@
           {% if t.done_at %}<span class="muted small">done {{ t.done_at.date().isoformat() }}</span>{% endif %}
         </div>
 
-        {% if t.tag_list %}
-          <div class="meta tagsrow">
-            {% for tag in t.tag_list %}<span class="pill tag">{{ tag.display_name }}</span>{% endfor %}
-          </div>
-        {% endif %}
-
-        <div class="meta sizerow">
-          <span class="pill effort e{{ t.effort }}" title="{{ EFFORT_LABELS[t.effort] }} — weight {{ EFFORT_WEIGHTS[t.effort] }}">{{ t.effort }}</span>
-          {% if t.for_person_id != self_id and t.person %}
-            <span class="pill who">for {{ t.person.display_name }}</span>
-          {% endif %}
+        <div class="meta linksrow">
           {% for l in t.links %}
             <a class="pill link" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.text }}</a>
           {% endfor %}
@@ -143,6 +144,20 @@
             <button class="mini danger" title="Soft delete: it goes to the archive with its notes">×</button>
           </form>
         {% endif %}
+
+        {# Private, per person, and out of the event log on purpose — so it is
+           never a touch and never reaches the report. Pressing the lit one
+           clears it, otherwise "no strong feeling" would be the one answer you
+           could not give back. #}
+        <div class="moods" role="group" aria-label="How this one feels">
+          {% set mine = moods.get(t.id) %}
+          {% for v in MOOD_VALUES %}
+            <button class="mood {% if mine == v %}on{% endif %}" type="button"
+                    data-mood="/app/{{ ws.id }}/tasks/{{ t.id }}/mood" data-value="{{ v }}"
+                    title="{{ MOOD_LABELS[v] }} — only you see this"
+                    aria-pressed="{{ 'true' if mine == v else 'false' }}">{{ MOOD_FACES[v] }}</button>
+          {% endfor %}
+        </div>
       </div>
     </li>
     {% endfor %}
