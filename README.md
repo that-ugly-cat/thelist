@@ -30,6 +30,11 @@ arrangement, "you proposed this in May and said no because…" is working memory
 asking for the work is usually outside the system. That is what makes the
 quarter countable.
 
+**A task points at more than one thing.** Links are rows, not a column: real
+tasks point at the paper, the shared folder and the thread where it was
+discussed. A missing scheme is filled in, and a link with no label shows a short
+form of its address rather than ninety characters of URL.
+
 **Notes are append-only.** They are the asynchronous channel between two people,
 and a note that can be edited afterwards is a conversation nobody can rely on.
 The author has fifteen minutes to fix a typo; after that, the correction is
@@ -61,7 +66,7 @@ CSV export is on the same page.
 cp .env.example .env      # JWT_SECRET is required
 python seed.py            # first account, local mode only
 python dev-run.py         # http://localhost:8020
-python smoke.py           # 79 checks, its own database
+python smoke.py           # 126 checks, its own database
 ```
 
 `AUTH_MODE=local` (the default) uses email and password. `AUTH_MODE=gateway`
