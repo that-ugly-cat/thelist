@@ -377,7 +377,8 @@ def add_task(title: str, board: str = "", for_person: str = "", tags: str = "",
 
     `for_person` is who the task is FOR — anyone, with or without an account; an
     unknown name creates that person on this board. Left empty it defaults to the
-    owner ("Me"), or to the proposer when an editor proposes.
+    board's owner, under their own name, or to the proposer when an editor
+    proposes.
 
     `effort` is S, M or L (declared size, never hours). `due` is ISO YYYY-MM-DD.
     `recurring` means it comes back every so often: completing it will keep it on

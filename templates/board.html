@@ -112,7 +112,7 @@
     <form method="post" action="/app/{{ ws.id }}/tasks" class="taskform">
       <label>Title <input name="title" required maxlength="200"></label>
       <label>For
-        <input name="for_person" list="people" placeholder="{% if is_owner %}Me{% else %}{{ user.label }}{% endif %}">
+        <input name="for_person" list="people" placeholder="{{ ws.owner.label if is_owner else user.label }}">
       </label>
       <label>Tags <input name="tags" list="tagnames" placeholder="BAG, ITE"></label>
       <div class="row">

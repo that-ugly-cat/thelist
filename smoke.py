@@ -246,6 +246,42 @@ def main_() -> int:
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
 
+        print("\n— the owner is a person with a name, not 'Me' —")
+        from models import Person, self_person, Workspace as _WS
+        db = SessionLocal()
+        ws_row = db.get(_WS, ws_id)
+        me = self_person(db, ws_row)
+        db.commit()
+        check("the owner-as-person carries the owner's name", me.display_name == "Spit",
+              me.display_name)
+        check("...and it is not 'Me'", me.display_name.lower() != "me")
+
+        # Renamed at the gate: the label follows, so no stale name is left behind.
+        owner_row = db.query(User).filter(User.email == "owner@example.org").first()
+        owner_row.name = "Giovanni Spitale"
+        db.commit()
+        me = self_person(db, ws_row)
+        db.commit()
+        check("a rename upstream updates the label",
+              me.display_name == "Giovanni Spitale", me.display_name)
+
+        # And the case that must not blow up: somebody else already goes by that
+        # name on this board. Merging would reattribute their tasks silently.
+        db.add(Person(workspace_id=ws_id, display_name="Someone Else",
+                      norm_name="someone else"))
+        db.commit()
+        owner_row.name = "Someone Else"
+        db.commit()
+        me = self_person(db, ws_row)
+        db.commit()
+        check("a name already taken leaves the label alone instead of merging",
+              me.display_name == "Giovanni Spitale", me.display_name)
+        owner_row.name = "Spit"
+        db.commit()
+        self_person(db, ws_row)
+        db.commit()
+        db.close()
+
         print("\n— invitations: public to read, gated to accept —")
         # The 503 in production came from here: the accepting half needed an
         # identity while sitting on a path declared public, where the gate never

@@ -170,8 +170,9 @@ class Person(Base):
     # Normalised for uniqueness; `display_name` keeps the form first written.
     norm_name = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    # "Me" is a row with a flag, not a special value in the code: the
-    # mine-vs-theirs share is then the same query as every other cut.
+    # The owner is a row with a flag, not a special value in the code: the
+    # mine-vs-theirs share is then the same query as every other cut. The label
+    # is their own name — see self_person() for why it is not "Me".
     is_owner_self = Column(Boolean, default=False, nullable=False)
     archived_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow, nullable=False)
@@ -455,9 +456,9 @@ def ensure_workspace(db, user) -> Workspace:
         db.flush()
         db.add(Membership(workspace_id=ws.id, user_id=user.id, role="owner"))
         db.flush()
-    # "Me" exists from the first moment, because it is the default of every new
-    # task and a default that has to be created lazily is a default that will
-    # one day be missing.
+    # The owner-as-person exists from the first moment, because it is the default
+    # of every new task, and a default created lazily is a default that will one
+    # day be missing.
     self_person(db, ws)
     return ws
 
@@ -469,17 +470,41 @@ def normalise(name: str) -> str:
 
 
 def self_person(db, ws: Workspace) -> Person:
+    """The owner, as a person a task can be for — under their own name.
+
+    It used to be called "Me", which reads fine on your own board and is
+    misleading everywhere else: an editor looking at somebody else's list saw
+    tasks "for Me" meaning somebody who is not them, and the report had a row
+    called Me next to rows called Markus and Nikola. A name is a name.
+
+    The label follows the owner's, here rather than at signup, so an account
+    renamed at the gate does not leave a stale name behind — and so boards
+    created before this change repair themselves the first time they are opened.
+    """
+    owner = db.query(User).get(ws.owner_user_id)
+    wanted = (owner.label if owner is not None else "").strip() or "Owner"
     p = (db.query(Person)
            .filter(Person.workspace_id == ws.id,
                    Person.is_owner_self == True).first())  # noqa: E712
     if p is None:
-        owner = db.query(User).get(ws.owner_user_id)
-        p = Person(workspace_id=ws.id, display_name="Me", norm_name="me",
-                   user_id=ws.owner_user_id, is_owner_self=True)
+        p = Person(workspace_id=ws.id, display_name=wanted,
+                   norm_name=normalise(wanted), user_id=ws.owner_user_id,
+                   is_owner_self=True)
         db.add(p)
         db.flush()
-        if owner is not None and owner.borant_sub is None:
-            pass
+        return p
+
+    if p.norm_name != normalise(wanted):
+        # Unless somebody else on this board already goes by that name. Merging
+        # the two would silently reattribute their tasks, which is a decision for
+        # a human and not a side effect of opening a page: leave the label alone
+        # and let it be renamed deliberately.
+        clash = (db.query(Person)
+                   .filter(Person.workspace_id == ws.id,
+                           Person.norm_name == normalise(wanted),
+                           Person.id != p.id).first())
+        if clash is None:
+            p.display_name, p.norm_name = wanted, normalise(wanted)
     return p
 
 
