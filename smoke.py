@@ -297,6 +297,24 @@ def main_() -> int:
               == ["https://example.org/second"])
         db.close()
 
+        print("\n— everything on a task is editable except the notes —")
+        r = O.post(f"/app/{ws_id}/links/{link_id}",
+                   data={"url": "docs.example.org/moved", "label": "Moved"},
+                   follow_redirects=False)
+        check("a link can be edited in place", r.status_code == 302, str(r.status_code))
+        db = SessionLocal()
+        l = db.query(Link).get(link_id)
+        check("...with the scheme filled in again",
+              l.url == "https://docs.example.org/moved", l.url)
+        check("...and the new label kept", l.label == "Moved")
+        db.close()
+        r = O.post(f"/app/{ws_id}/links/{link_id}", data={"url": "  "},
+                   follow_redirects=False)
+        check("a link cannot be emptied", r.status_code == 400)
+        r = E.post(f"/app/{ws_id}/links/{link_id}", data={"url": "x.org"},
+                   follow_redirects=False)
+        check("an editor cannot edit links", r.status_code == 404)
+
         print("\n— relevant contacts, which are not the person it is for —")
         r = O.post(f"/app/{ws_id}/tasks/{linked_id}/contacts",
                    data={"name": "Anna", "email": "anna@example.org",
@@ -320,6 +338,22 @@ def main_() -> int:
         r = E.post(f"/app/{ws_id}/tasks/{linked_id}/contacts", data={"name": "X"},
                    follow_redirects=False)
         check("an editor cannot add contacts", r.status_code == 404)
+        r = O.post(f"/app/{ws_id}/contacts/{contact_id}",
+                   data={"name": "Anna Redaelli", "email": "anna@example.org",
+                         "reason": "tiene la sala e le chiavi"}, follow_redirects=False)
+        check("a contact can be edited in place", r.status_code == 302, str(r.status_code))
+        db = SessionLocal()
+        # NOT `c`: that name is the anonymous TestClient, and shadowing it here
+        # breaks every check after this one with an error that points nowhere
+        # near the line that caused it.
+        from models import Contact as _C
+        ct = db.query(_C).get(contact_id)
+        check("...with the new name and reason",
+              ct.name == "Anna Redaelli" and ct.reason.endswith("chiavi"))
+        db.close()
+        r = O.post(f"/app/{ws_id}/contacts/{contact_id}",
+                   data={"name": "", "email": ""}, follow_redirects=False)
+        check("a contact cannot be emptied of both", r.status_code == 400)
         r = O.post(f"/app/{ws_id}/contacts/{contact_id}/delete", follow_redirects=False)
         check("...and one can be removed", r.status_code == 302)
         db = SessionLocal()

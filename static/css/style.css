@@ -286,3 +286,10 @@ dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }
   font: inherit; font-size: 13px; line-height: 1; padding: 0;
 }
 .tagx:hover { color: var(--danger); }
+
+/* ── editing a link or a contact in place ── */
+.rowform { flex: 1; gap: 6px; }
+.rowform input { margin: 0; font-size: 13px; }
+.contactrow { display: flex; flex-wrap: wrap; align-items: center; }
+.contactrow input[name="reason"] { flex: 2; min-width: 180px; }
+.links li, .contacts li { align-items: center; }

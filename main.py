@@ -618,6 +618,47 @@ async def add_task_link(task_id: int, url: str = Form(...), label: str = Form(""
     return RedirectResponse(f"/app/{acc.workspace.id}#task-{t.id}", status_code=302)
 
 
+@app.post("/app/{workspace_id}/links/{link_id}")
+async def edit_task_link(link_id: int, url: str = Form(...), label: str = Form(""),
+                         acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                         db: Session = Depends(get_db)):
+    link = (db.query(Link).join(Task, Task.id == Link.task_id)
+              .filter(Link.id == link_id,
+                      Task.workspace_id == acc.workspace.id).first())
+    if link is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    url = (url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="A link needs an address.")
+    if "://" not in url:
+        url = "https://" + url
+    link.url, link.label = url, (label or "").strip()
+    log_event(db, acc.workspace.id, "edited", actor=acc.user,
+              task=db.query(Task).get(link.task_id), edited_link=link.id)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}#task-{link.task_id}", status_code=302)
+
+
+@app.post("/app/{workspace_id}/contacts/{contact_id}")
+async def edit_task_contact(contact_id: int, name: str = Form(""), email: str = Form(""),
+                            reason: str = Form(""),
+                            acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                            db: Session = Depends(get_db)):
+    c = (db.query(Contact).join(Task, Task.id == Contact.task_id)
+           .filter(Contact.id == contact_id,
+                   Task.workspace_id == acc.workspace.id).first())
+    if c is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    name, email = (name or "").strip(), (email or "").strip()
+    if not name and not email:
+        raise HTTPException(status_code=400, detail="A contact needs a name or an address.")
+    c.name, c.email, c.reason = name, email, (reason or "").strip()
+    log_event(db, acc.workspace.id, "edited", actor=acc.user,
+              task=db.query(Task).get(c.task_id), edited_contact=c.id)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}#task-{c.task_id}", status_code=302)
+
+
 @app.post("/app/{workspace_id}/links/{link_id}/delete")
 async def delete_task_link(link_id: int,
                            acc: WorkspaceAccess = Depends(workspace_dep("owner")),

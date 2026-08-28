@@ -861,3 +861,67 @@ def remove_task_contact(contact_id: int, board: str = "") -> dict:
         return {"removed": True, "task_id": task}
     finally:
         db.close()
+
+
+@mcp.tool()
+def edit_task_link(link_id: int, url: str = "", label: str = "",
+                   board: str = "") -> dict:
+    """Change a link already on a task. Owner only.
+
+    Empty means "leave it alone", as everywhere else here. A link cannot be left
+    without an address: to take one away, use `remove_task_link`.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        link = (db.query(Link).join(Task, Task.id == Link.task_id)
+                  .filter(Link.id == link_id, Task.workspace_id == ws.id).first())
+        if link is None:
+            return _fail("link not found")
+        if url.strip():
+            u = url.strip()
+            link.url = u if "://" in u else "https://" + u
+        if label.strip():
+            link.label = label.strip()
+        t = db.query(Task).get(link.task_id)
+        log_event(db, ws.id, "edited", actor=user, task=t, edited_link=link.id,
+                  via="mcp")
+        db.commit()
+        return {"updated": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def edit_task_contact(contact_id: int, name: str = "", email: str = "",
+                      reason: str = "", board: str = "") -> dict:
+    """Change a contact already on a task. Owner only.
+
+    Empty means "leave it alone". A contact cannot end up with neither a name
+    nor an address: to take one away, use `remove_task_contact`.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        c = (db.query(Contact).join(Task, Task.id == Contact.task_id)
+               .filter(Contact.id == contact_id, Task.workspace_id == ws.id).first())
+        if c is None:
+            return _fail("contact not found")
+        new_name = name.strip() or c.name
+        new_email = email.strip() or c.email
+        if not new_name and not new_email:
+            return _fail("a contact needs a name or an address")
+        c.name, c.email = new_name, new_email
+        if reason.strip():
+            c.reason = reason.strip()
+        t = db.query(Task).get(c.task_id)
+        log_event(db, ws.id, "edited", actor=user, task=t, edited_contact=c.id,
+                  via="mcp")
+        db.commit()
+        return {"updated": True, "task": _brief(db, t)}
+    finally:
+        db.close()
