@@ -241,6 +241,10 @@ table.report tr.self td:first-child { color: var(--accent-light); }
    had no date and no links. `:has()` looks at elements and ignores text. */
 .meta.when:not(:has(*)), .meta.linksrow:not(:has(*)) { display: none; }
 .pill.contact { border-color: var(--muted-3); }
+/* The archive holds two different exits. Done is the quiet default and needs no
+   colour; deleted is the one you have to be able to pick out of a list you are
+   scrolling to find something to restore. */
+.pill.gone { border-color: var(--danger-border); background: var(--danger-bg); color: var(--danger); }
 
 /* ── a task opens in a modal, not a sidebar ── */
 dialog.taskmodal {
@@ -308,6 +312,33 @@ dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }
 .contactrow { display: flex; flex-wrap: wrap; align-items: center; }
 .contactrow input[name="reason"] { flex: 2; min-width: 180px; }
 .links li, .contacts li { align-items: center; }
+
+/* ── the toast: what just happened, and the way back ── */
+/* Bottom centre and fixed: the actions that raise it are spread down the right
+   edge of a long list, so anchoring it to the row would put it wherever you
+   happened to be scrolled. One place, always the same place. */
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; z-index: 50;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: var(--radius);
+  background: var(--card); border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
+  color: var(--text); font-size: 13px;
+}
+.toast.hidden { display: none; }
+.toasttext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toastundo {
+  flex: none; background: none; cursor: pointer;
+  border: 1px solid var(--accent); border-radius: 6px;
+  color: var(--accent-light); padding: 3px 10px; font-size: 12px;
+}
+.toastundo:hover { background: var(--primary); color: var(--text); }
+.toastundo.hidden { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .toast:not(.hidden) { animation: toastin .16s ease-out; }
+  @keyframes toastin { from { opacity: 0; transform: translate(-50%, 8px); } }
+}
 
 /* ── the earmark: a private dot, one per person ── */
 .earmark {

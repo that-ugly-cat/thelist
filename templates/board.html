@@ -116,6 +116,13 @@
             <span class="muted small">last done {{ t.last_done_at.date().isoformat() }}</span>
           {% endif %}
           {% if t.done_at %}<span class="muted small">done {{ t.done_at.date().isoformat() }}</span>{% endif %}
+          {# Two different exits, and the archive has to say which: one is
+             finished work, the other is a row that should not have been there.
+             A task can have taken both doors, so deleted is shown last and wins
+             the reading. #}
+          {% if t.deleted_at %}
+            <span class="pill gone">deleted {{ t.deleted_at.date().isoformat() }}</span>
+          {% endif %}
         </div>
 
         <div class="meta linksrow">
@@ -129,20 +136,38 @@
       </div>
 
       <div class="actions">
-        {% if t.status == 'active' %}
+        {% if t.deleted_at %}
+          {# The trash, and the only place a row can be destroyed from. Restore
+             puts it back where it was; the other button is the end of it. #}
+          <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/restore">
+            <button class="mini" title="Put it back on the list">restore</button>
+          </form>
+          {% if is_owner %}
+            <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/purge"
+                  onsubmit="return confirm('Delete “{{ t.title|replace('"', "'") }}” for good?\n\nThis cannot be undone. {% set n = note_counts.get(t.id, 0) %}Its {{ n }} note{{ '' if n == 1 else 's' }}, links and contacts go with it — notes other people wrote included.\n\nThe report does not change: the events stay.')">
+              <button class="mini danger" title="Destroy it. No undo.">delete forever</button>
+            </form>
+          {% endif %}
+        {% elif t.status == 'active' %}
           <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/done">
             <button class="mini ok" title="{% if t.recurring %}Record that you did it — it stays on the list{% else %}Mark done and archive{% endif %}">done</button>
           </form>
+          {% if is_owner %}
+            <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/delete"
+                  onsubmit="return confirm('Remove from the list? It stays in the archive, notes included.')">
+              <button class="mini danger" title="Soft delete: it goes to the archive with its notes">×</button>
+            </form>
+          {% endif %}
         {% else %}
           <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/reopen">
             <button class="mini">reopen</button>
           </form>
-        {% endif %}
-        {% if is_owner %}
-          <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/delete"
-                onsubmit="return confirm('Remove from the list? It stays in the archive, notes included.')">
-            <button class="mini danger" title="Soft delete: it goes to the archive with its notes">×</button>
-          </form>
+          {% if is_owner %}
+            <form method="post" action="/app/{{ ws.id }}/tasks/{{ t.id }}/delete"
+                  onsubmit="return confirm('Remove from the list? It stays in the archive, notes included.')">
+              <button class="mini danger" title="Soft delete: it goes to the archive with its notes">×</button>
+            </form>
+          {% endif %}
         {% endif %}
 
         {# Private, per person, and out of the event log on purpose — so it is
@@ -166,6 +191,15 @@
   <p id="ordermsg" class="err hidden">
     Someone else reordered this list while you were dragging. Reload and try again.
   </p>
+</div>
+
+{# Outside #tasks on purpose: refreshList() replaces that whole <ul>, and a
+   toast living inside it would be swept away by the very redraw that follows
+   the action it is reporting. `role=status` and not `alert` — this is the
+   confirmation of something the person just did, not an interruption. #}
+<div class="toast hidden" id="toast" role="status" aria-live="polite">
+  <span class="toasttext"></span>
+  <button class="toastundo hidden" type="button">undo</button>
 </div>
 
 <dialog class="taskmodal" id="newtask">

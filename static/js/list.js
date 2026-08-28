@@ -306,17 +306,75 @@
     dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); close(); });
   }
 
+  // ── the toast, and what an undo is allowed to claim ──
+  //
+  // Offered for exactly two actions, because those are the two that `reopen`
+  // and `restore` genuinely reverse. Completing a RECURRING task is not one of
+  // them: it records last_done_at and clears the due date, and reopening
+  // restores neither while moving the row to the bottom. So a recurring
+  // completion gets the confirmation and no button — a button that does not put
+  // things back is worse than no button.
+  const toast = document.getElementById("toast");
+  const toastText = toast && toast.querySelector(".toasttext");
+  const toastUndo = toast && toast.querySelector(".toastundo");
+  let toastTimer = null;
+
+  function showToast(message, undoUrl) {
+    if (!toast) return;
+    clearTimeout(toastTimer);
+    toastText.textContent = message;
+    toastUndo.classList.toggle("hidden", !undoUrl);
+    toastUndo.dataset.url = undoUrl || "";
+    toast.classList.remove("hidden");
+    // Long enough to read a title and decide, short enough not to sit over the
+    // list while you carry on working.
+    toastTimer = setTimeout(() => toast.classList.add("hidden"), 9000);
+  }
+
+  if (toastUndo) {
+    toastUndo.addEventListener("click", () => {
+      const url = toastUndo.dataset.url;
+      if (!url) return;
+      clearTimeout(toastTimer);
+      toast.classList.add("hidden");
+      fetch(url, { method: "POST" })
+        .then((r) => (r.ok ? refreshList() : location.reload()))
+        .catch(() => location.reload());
+    });
+  }
+
   document.addEventListener("submit", (e) => {
     const form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
     if (!form.closest("#tasks")) return;      // solo i bottoni delle righe
     e.preventDefault();
+
+    // Read the row BEFORE the POST: refreshList() is about to replace it, and
+    // the title is what makes the toast worth reading.
+    const row = form.closest(".task");
+    const title = row ? row.querySelector(".title").textContent.trim() : "";
+    const recurring = !!(row && row.querySelector(".pill.rec"));
+    const base = form.action.replace(/\/(done|delete)$/, "");
+    let message = "";
+    let undoUrl = "";
+    if (/\/done$/.test(form.action)) {
+      message = recurring ? `Recorded: ${title}` : `Done: ${title}`;
+      undoUrl = recurring ? "" : `${base}/reopen`;
+    } else if (/\/delete$/.test(form.action)) {
+      message = `Removed: ${title}`;
+      undoUrl = `${base}/restore`;
+    }
+
     fetch(form.action, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(new FormData(form)),
     })
-      .then((r) => (r.ok ? refreshList() : location.reload()))
+      .then((r) => {
+        if (!r.ok) return location.reload();
+        if (message) showToast(message, undoUrl);
+        return refreshList();
+      })
       .catch(() => location.reload());
   });
 

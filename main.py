@@ -28,6 +28,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import crypto
@@ -45,8 +46,8 @@ from models import (
     ApiKey, Contact, Earmark, Event, Invitation, Link, Membership, Note,
     NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
-    active_tasks, add_contact, add_link, apply_order, earmarked_ids,
-    moods_of, set_mood,
+    active_tasks, add_contact, add_link, apply_order, archived_tasks,
+    earmarked_ids, moods_of, purge_task, set_mood,
     toggle_earmark, ensure_one_admin, ensure_workspace,
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
@@ -448,11 +449,17 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
                 acc: WorkspaceAccess = Depends(workspace_dep("editor")),
                 db: Session = Depends(get_db)):
     ws = acc.workspace
+    note_counts = {}
     if archive:
-        rows = (db.query(Task)
-                  .filter(Task.workspace_id == ws.id, Task.status == "done",
-                          Task.deleted_at.is_(None))
-                  .order_by(Task.done_at.desc()).all())
+        rows = archived_tasks(db, ws).all()
+        # Only for the trash, and only to put a number in the confirmation:
+        # "its 3 notes go with it" is a different sentence from "its notes go
+        # with it", and the first one is the one that stops a wrong click.
+        gone = [t.id for t in rows if t.deleted_at is not None]
+        if gone:
+            note_counts = dict(
+                db.query(Note.task_id, func.count(Note.id))
+                  .filter(Note.task_id.in_(gone)).group_by(Note.task_id).all())
     else:
         rows = active_tasks(db, ws).all()
 
@@ -478,7 +485,7 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
     return templates.TemplateResponse(request, "board.html", _ctx(
         db, acc, tasks=rows, view=view, tag=tag, person=person, archive=archive,
         people=people_of(db, ws), tags=tags_of(db, ws), self_id=self_person(db, ws).id,
-        marked=marked, moods=moods_of(db, ws, acc.user),
+        marked=marked, moods=moods_of(db, ws, acc.user), note_counts=note_counts,
         only_marked=bool(request.query_params.get("marked"))))
 
 
@@ -618,6 +625,26 @@ async def restore_task(task_id: int, acc: WorkspaceAccess = Depends(workspace_de
     if t.status == "active":
         t.position = next_position(db, acc.workspace)
     log_event(db, acc.workspace.id, "restored", actor=acc.user, task=t)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}?archive=1", status_code=302)
+
+
+@app.post("/app/{workspace_id}/tasks/{task_id}/purge")
+async def purge(task_id: int, acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                db: Session = Depends(get_db)):
+    """Delete a deleted row for good. Owner only, and there is no undo.
+
+    Only reachable on something already soft-deleted — `_visible_task(deleted=
+    True)` is the guard, and it is deliberate: you cannot skip the trash, so
+    nothing is ever one click from gone. The events stay, with their task_id
+    emptied, so no past report changes because somebody tidied up.
+    """
+    t = _visible_task(db, acc, task_id, deleted=True)
+    title = t.title
+    counts = purge_task(db, t)
+    # No task to point at any more, so the title travels in the payload — the
+    # only trace left that this row was here at all.
+    log_event(db, acc.workspace.id, "purged", actor=acc.user, title=title, **counts)
     db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}?archive=1", status_code=302)
 

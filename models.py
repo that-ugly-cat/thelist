@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text,
-    UniqueConstraint, create_engine, func, text,
+    UniqueConstraint, create_engine, func, or_, text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 
@@ -88,9 +88,24 @@ MOOD_LABELS = {-1: "This one costs me", 0: "Neither here nor there",
 
 EVENT_TYPES = [
     "created", "proposed", "accepted", "rejected", "edited", "reordered",
-    "done", "reopened", "note_added", "deleted", "restored",
+    "done", "reopened", "note_added", "deleted", "restored", "purged",
     "member_added", "member_removed", "for_changed", "person_renamed",
 ]
+
+# What the report does not count as work on a row, by NAME and deliberately not
+# by "has no task_id".
+#
+# The task_id test was the obvious one and it was a trap: purging a row empties
+# that column on events that already happened, so last quarter's touches would
+# quietly drop every time somebody tidied up the trash — exactly the rewriting
+# the snapshots exist to prevent. The type never changes.
+#
+# The workspace-level four carry no task and no snapshot. `created` is out
+# because opening a row is not working on it. `purged` is out because by then
+# there is no task left to snapshot, so it would land in an Unassigned bucket of
+# its own and say nothing about anybody.
+UNCOUNTED_EVENTS = ("created", "purged", "reordered",
+                    "member_added", "member_removed", "person_renamed")
 
 # Mail this app can send, and whether it is on unless somebody turns it off
 # (SPEC.md §7). Notes are off because with two people a mail per note means
@@ -740,6 +755,54 @@ def active_tasks(db, ws: Workspace):
               .order_by(Task.position, Task.id))
 
 
+def archived_tasks(db, ws: Workspace):
+    """Everything that has left the list, both ways of leaving it.
+
+    Completed and deleted are two different exits and the archive has to say
+    which: one is a finished piece of work worth looking back at, the other is a
+    row that should not have been there. Until now this query asked only for the
+    first and quietly dropped the second, which made the delete button's own
+    promise — *it stays in the archive* — untrue, and left `restore` reachable
+    from nowhere.
+
+    Ordered by when it left, whichever door it took.
+    """
+    return (db.query(Task)
+              .filter(Task.workspace_id == ws.id,
+                      or_(Task.status == "done", Task.deleted_at.isnot(None)))
+              .order_by(func.coalesce(Task.deleted_at, Task.done_at).desc(),
+                        Task.id.desc()))
+
+
+def purge_task(db, task: Task) -> dict:
+    """Remove a deleted row for good. Irreversible, and only from the trash.
+
+    **The events survive, with their task_id emptied.** They carry snap_person,
+    snap_effort and snap_tags exactly so that the report does not depend on the
+    row still existing — deleting them would silently rewrite last quarter every
+    time somebody tidied up, which is the one thing the event log is there to
+    prevent.
+
+    What does go is the content: notes, links, contacts, tags, and the private
+    marks. Notes included, and that is the cost worth naming out loud — soft
+    delete exists because a note is a conversation between two people, so
+    purging destroys somebody else's writing and not only your own row. The
+    caller is expected to have said so before asking.
+    """
+    counts = {
+        "notes": db.query(Note).filter(Note.task_id == task.id).count(),
+        "links": len(task.links), "contacts": len(task.contacts),
+        "events_kept": db.query(Event).filter(Event.task_id == task.id).count(),
+    }
+    for model in (Note, Earmark, Mood):
+        db.query(model).filter(model.task_id == task.id).delete(synchronize_session=False)
+    # Before the row goes, or the foreign key is left pointing at nothing.
+    db.query(Event).filter(Event.task_id == task.id).update(
+        {"task_id": None}, synchronize_session=False)
+    db.delete(task)   # tags, links and contacts go by ORM cascade
+    return counts
+
+
 def next_position(db, ws: Workspace) -> int:
     top = (db.query(func.max(Task.position))
              .filter(Task.workspace_id == ws.id, Task.status == "active")
@@ -812,20 +875,14 @@ def report(db, ws: Workspace, start: datetime, end: datetime) -> dict:
     that is VISIBLE. A weighted column on its own would have hidden exactly the
     case where the weight was never used.
     """
-    # Every event that happened TO A TASK, minus the creation.
-    #
-    # `task_id is not null` is not tidiness: `reordered`, `member_added` and
-    # `person_renamed` carry no task, therefore no snap_person_id, and without
-    # the filter they would all pile into the "Unassigned" bucket of every row.
-    #
-    # `created` is out because opening a row is not working on it, and a day
-    # spent filling the board would otherwise read as a day of work. What is
-    # left answers "how often was this come back to".
+    # Every event that was work on a row. The exclusions are by type and the
+    # reasons are on UNCOUNTED_EVENTS — the short version is that a day spent
+    # filling the board is not a day of work, and that a purge must never move a
+    # number that was already true.
     evs = (db.query(Event)
              .filter(Event.workspace_id == ws.id,
                      Event.created_at >= start, Event.created_at < end,
-                     Event.task_id.isnot(None),
-                     Event.type != "created")
+                     Event.type.notin_(UNCOUNTED_EVENTS))
              .all())
     people = {p.id: p for p in people_of(db, ws, include_archived=True)}
     tags = {t.name: t for t in tags_of(db, ws)}

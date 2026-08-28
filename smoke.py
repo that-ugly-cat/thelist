@@ -285,7 +285,10 @@ def main_() -> int:
         # board keep exercising the page they always exercised.
 
         print("\n— the three faces: private, and never counted —")
-        from models import Event, Mood
+        # Note lands here rather than further down: a name imported anywhere in
+        # this function is local to all of it, so the later `from models import
+        # Note` would leave it unbound up here.
+        from models import Event, Mood, Note
         r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "-1"})
         check("a face can be set", r.json()["value"] == -1, str(r.json()))
         r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "1"})
@@ -320,6 +323,63 @@ def main_() -> int:
         r = E.get(f"/app/{ws_id}")
         check("...and a board never shows somebody else's",
               r.text.count('class="mood on"') <= len(ids))
+
+        # The toast itself is client-side, so what the server can promise is that
+        # the target exists and sits OUTSIDE the list the redraw replaces.
+        r = O.get(f"/app/{ws_id}")
+        check("the toast target is on the page", 'id="toast"' in r.text)
+        check("...and outside #tasks, which the redraw wipes",
+              r.text.index('id="toast"') > r.text.index('id="ordermsg"'))
+
+        print("\n— the archive holds two different exits —")
+        # A row on its way out one way, another on its way out the other.
+        O.post(f"/app/{ws_id}/tasks/{ids[1]}/done", follow_redirects=False)
+        O.post(f"/app/{ws_id}/tasks/{ids[2]}/delete", follow_redirects=False)
+        r = O.get(f"/app/{ws_id}?archive=1")
+        check("a completed row is in the archive", f'id="task-{ids[1]}"' in r.text)
+        check("...and so is a deleted one, which it never was before",
+              f'id="task-{ids[2]}"' in r.text)
+        check("...and the deleted one says so", "pill gone" in r.text)
+        check("restore is reachable from there at last",
+              f"/tasks/{ids[2]}/restore" in r.text)
+        check("delete forever is offered only on the deleted one",
+              r.text.count("/purge") == 1, str(r.text.count("/purge")))
+        r = O.get(f"/app/{ws_id}")
+        check("neither is back on the list",
+              f'id="task-{ids[1]}"' not in r.text and f'id="task-{ids[2]}"' not in r.text)
+
+        print("\n— delete forever, and the report that must not move —")
+        r = O.post(f"/app/{ws_id}/tasks/{ids[1]}/purge", follow_redirects=False)
+        check("a merely completed row cannot be purged", r.status_code == 404,
+              str(r.status_code))
+        r = E.post(f"/app/{ws_id}/tasks/{ids[2]}/purge", follow_redirects=False)
+        check("an editor cannot purge", r.status_code in (403, 404), str(r.status_code))
+
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        before_rep = report_(db, ws_, dt(2000, 1, 1), dt(2100, 1, 1))["people"]
+        n_ev = db.query(Event).filter(Event.task_id == ids[2]).count()
+        db.close()
+        check("the doomed row has events to lose", n_ev > 0, str(n_ev))
+
+        r = O.post(f"/app/{ws_id}/tasks/{ids[2]}/purge", follow_redirects=False)
+        check("the owner can", r.status_code == 302)
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        check("the row is gone for good", db.query(Task).get(ids[2]) is None)
+        check("...with its notes", db.query(Note).filter(Note.task_id == ids[2]).count() == 0)
+        check("...and its private marks",
+              db.query(Mood).filter(Mood.task_id == ids[2]).count() == 0)
+        # The one thing that must survive: tidying up cannot rewrite a past report.
+        orphans = db.query(Event).filter(Event.task_id.is_(None),
+                                         Event.workspace_id == ws_id).count()
+        after_rep = report_(db, ws_, dt(2000, 1, 1), dt(2100, 1, 1))["people"]
+        purged = db.query(Event).filter(Event.type == "purged").count()
+        db.close()
+        check("its events survive with no task to point at", orphans >= n_ev, str(orphans))
+        check("...so the report reads exactly as before",
+              before_rep == after_rep)
+        check("...and the purge itself is on the record", purged == 1)
 
         print("\n— notes are append-only —")
         db = SessionLocal()
