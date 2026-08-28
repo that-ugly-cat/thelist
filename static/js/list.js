@@ -298,6 +298,8 @@
         .then((d) => {
           mark.classList.toggle("on", d.on);
           mark.setAttribute("aria-pressed", String(d.on));
+          const row = mark.closest(".task");
+          if (row) row.classList.toggle("marked", d.on);
         });
       return;
     }

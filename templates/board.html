@@ -60,7 +60,7 @@
        length of one drag — see list.js. A permanently draggable row swallows the
        clicks and the text selection of everything inside it, on some browsers
        silently, which is how the description expander came to "not work". #}
-    <li class="task" id="task-{{ t.id }}" data-id="{{ t.id }}">
+    <li class="task {% if t.id in marked %}marked{% endif %}" id="task-{{ t.id }}" data-id="{{ t.id }}">
       <span class="grip {% if not sortable %}off{% endif %}"
             title="{% if sortable %}Drag to reorder{% else %}Reordering only works on the unfiltered list{% endif %}">⠿</span>
       {# Private, per person, and deliberately not in the event log: a mark that

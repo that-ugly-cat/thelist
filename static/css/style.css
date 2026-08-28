@@ -306,4 +306,10 @@ dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }
 }
 .earmark:hover { color: var(--warn); transform: scale(1.25); }
 .earmark.on { color: var(--warn); }
+/* The marked row gets a bar down its left edge — an INSET SHADOW and not a real
+   border, which is how PaperTrail does it and for a reason worth copying with
+   it: a border would add 3px to the box and shift every line on the page the
+   moment you clicked. */
+.task.marked { box-shadow: inset 3px 0 0 var(--warn); }
+.task.marked:hover { background: var(--card-hover); }
 .pill.mark.on { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
