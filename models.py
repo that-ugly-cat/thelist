@@ -303,6 +303,26 @@ class Contact(Base):
         return (self.name or "").strip() or (self.email or "").strip() or "someone"
 
 
+class Earmark(Base):
+    """A private dot on a row, one per person.
+
+    Borrowed from PaperTrail's yellow flag, and the two properties that make it
+    useful are both negative: **it is not a permission** — earmarking something
+    grants nothing and takes nothing away — and **it does not go into the event
+    log**, so it never shows up in the report or in anybody else's history.
+
+    That is what lets it be used carelessly. A mark that other people can see is
+    a message; a mark that gets counted is a commitment. This is neither: it is
+    the equivalent of putting your thumb on a page.
+    """
+    __tablename__ = "earmarks"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    __table_args__ = (UniqueConstraint("task_id", "user_id"),)
+
+
 class Note(Base):
     """Append-only, and not out of laziness (SPEC.md §3.7).
 
@@ -837,6 +857,27 @@ def migrate_links(db) -> int:
             moved += 1
         t.link_url, t.link_label = "", ""
     return moved
+
+
+def earmarked_ids(db, ws: Workspace, user) -> set:
+    """The rows this person has marked, on this board. Never anybody else's."""
+    if user is None:
+        return set()
+    rows = (db.query(Earmark.task_id)
+              .join(Task, Task.id == Earmark.task_id)
+              .filter(Task.workspace_id == ws.id, Earmark.user_id == user.id).all())
+    return {r[0] for r in rows}
+
+
+def toggle_earmark(db, task: Task, user) -> bool:
+    """On or off, and returns which. No event is logged, on purpose."""
+    row = (db.query(Earmark)
+             .filter(Earmark.task_id == task.id, Earmark.user_id == user.id).first())
+    if row is None:
+        db.add(Earmark(task_id=task.id, user_id=user.id))
+        return True
+    db.delete(row)
+    return False
 
 
 def add_contact(db, task: Task, name: str, email: str = "",

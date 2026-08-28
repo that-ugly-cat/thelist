@@ -20,6 +20,9 @@
 {% endif %}
 
 <div class="filters">
+  <a href="/app/{{ ws.id }}{% if only_marked %}{% else %}?marked=1{% endif %}"
+     class="pill mark {% if only_marked %}on{% endif %}"
+     title="Only what you earmarked">● earmarked</a>
   <span class="lbl">For</span>
   <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
      class="pill {% if not person %}on{% endif %}">everyone</a>
@@ -60,6 +63,12 @@
     <li class="task" id="task-{{ t.id }}" data-id="{{ t.id }}">
       <span class="grip {% if not sortable %}off{% endif %}"
             title="{% if sortable %}Drag to reorder{% else %}Reordering only works on the unfiltered list{% endif %}">⠿</span>
+      {# Private, per person, and deliberately not in the event log: a mark that
+         gets counted is a commitment, and this one is meant to be used
+         carelessly. Nobody sees anybody else's. #}
+      <button class="earmark {% if t.id in marked %}on{% endif %}" type="button"
+              data-earmark="/app/{{ ws.id }}/tasks/{{ t.id }}/earmark"
+              title="Earmark — only you see this" aria-pressed="{{ 'true' if t.id in marked else 'false' }}">●</button>
 
       <div class="body">
         <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
@@ -77,10 +86,10 @@
             {% else %}
               <span class="desclabel flat">description</span>
             {% endif %}
-            <div class="desc">
-              <span class="short">{{ t.description[:180] }}{% if long %}…{% endif %}</span>
-              {% if long %}<span class="full hidden">{{ t.description }}</span>{% endif %}
-            </div>
+            {# Nessuno spazio fra il div e gli span: white-space serve il testo,
+               e il testo qui dentro include l'indentazione del template. Ecco da
+               dove venivano la riga vuota sopra e il rientro della prima riga. #}
+            <div class="desc"><span class="short">{{ t.description[:180] }}{% if long %}…{% endif %}</span>{% if long %}<span class="full hidden">{{ t.description }}</span>{% endif %}</div>
           </div>
         {% endif %}
 

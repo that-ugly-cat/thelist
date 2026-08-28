@@ -297,6 +297,49 @@ def main_() -> int:
               == ["https://example.org/second"])
         db.close()
 
+        print("\n— the earmark: private, per person, and not in the log —")
+        from models import Earmark, Event as _Ev
+        before = db_events = None
+        db = SessionLocal()
+        before = db.query(_Ev).count()
+        db.close()
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/earmark")
+        check("marking answers on", r.json() == {"on": True}, r.text[:60])
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/earmark")
+        check("...and clicking again answers off", r.json() == {"on": False})
+        O.post(f"/app/{ws_id}/tasks/{linked_id}/earmark")
+        db = SessionLocal()
+        check("it writes no event at all", db.query(_Ev).count() == before,
+              f"{db.query(_Ev).count()} vs {before}")
+        db.close()
+        r = E.post(f"/app/{ws_id}/tasks/{linked_id}/earmark")
+        check("an editor can mark too", r.json() == {"on": True})
+        db = SessionLocal()
+        check("...on their own row, not the owner's",
+              db.query(Earmark).filter(Earmark.task_id == linked_id).count() == 2)
+        db.close()
+        r = O.get(f"/app/{ws_id}?marked=1")
+        check("the filter shows the marked one", "Linked thing" in r.text)
+        r = E.get(f"/app/{ws_id}?marked=1")
+        check("...and each person sees their own marks", "Linked thing" in r.text)
+        # An editor unmarks: the owner's mark must survive.
+        E.post(f"/app/{ws_id}/tasks/{linked_id}/earmark")
+        db = SessionLocal()
+        check("unmarking removes only your own",
+              db.query(Earmark).filter(Earmark.task_id == linked_id).count() == 1)
+        db.close()
+
+        print("\n— notes come newest first —")
+        O.post(f"/app/{ws_id}/tasks/{linked_id}/notes", data={"body": "prima nota"},
+               follow_redirects=False)
+        O.post(f"/app/{ws_id}/tasks/{linked_id}/notes", data={"body": "seconda nota"},
+               follow_redirects=False)
+        r = O.get(f"/app/{ws_id}/task/{linked_id}")
+        check("the newest is above the older one",
+              r.text.index("seconda nota") < r.text.index("prima nota"))
+        check("...and the box to write is above both",
+              r.text.index("Add note") < r.text.index("seconda nota"))
+
         print("\n— everything on a task is editable except the notes —")
         r = O.post(f"/app/{ws_id}/links/{link_id}",
                    data={"url": "docs.example.org/moved", "label": "Moved"},

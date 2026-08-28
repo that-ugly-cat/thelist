@@ -130,6 +130,17 @@
     talk to each other here, and one that can be changed afterwards is a
     conversation nobody can rely on.
   </p>
+  <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}/notes" class="noteform">
+    <textarea name="body" id="note-{{ task.id }}" rows="2"
+              placeholder="Add a note — it cannot be edited afterwards" required></textarea>
+    <div class="btnrow">
+      <button class="btn small" type="submit">Add note</button>
+      <button class="btn small ghost" type="button"
+              data-bigeditor="/app/{{ ws.id }}/tasks/{{ task.id }}/notes"
+              data-from="note-{{ task.id }}">Large editor</button>
+    </div>
+  </form>
+
   {% if not notes %}<p class="muted small">Nothing yet.</p>{% endif %}
   <ul class="notes">
     {% for n in notes %}
@@ -147,17 +158,6 @@
       </li>
     {% endfor %}
   </ul>
-
-  <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}/notes" class="noteform">
-    <textarea name="body" id="note-{{ task.id }}" rows="2"
-              placeholder="Add a note — it cannot be edited afterwards" required></textarea>
-    <div class="btnrow">
-      <button class="btn small" type="submit">Add note</button>
-      <button class="btn small ghost" type="button"
-              data-bigeditor="/app/{{ ws.id }}/tasks/{{ task.id }}/notes"
-              data-from="note-{{ task.id }}">Large editor</button>
-    </div>
-  </form>
 
   {% if events %}
     <h3>History</h3>

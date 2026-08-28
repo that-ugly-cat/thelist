@@ -101,9 +101,9 @@ code { background: #0f1117; border: 1px solid var(--border); padding: 1px 6px; b
 
 .tasks { list-style: none; margin: 0; padding: 0; }
 .task {
-  display: flex; align-items: flex-start; gap: 10px;
+  display: flex; align-items: flex-start; gap: 9px;
   background: var(--card); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px;
+  border-radius: var(--radius); padding: 8px 11px; margin-bottom: 6px;
 }
 .task:hover { background: var(--card-hover); }
 .task.dragging { opacity: .4; }
@@ -113,7 +113,7 @@ code { background: #0f1117; border: 1px solid var(--border); padding: 1px 6px; b
 .task .body { flex: 1; min-width: 0; }
 .task .title { color: var(--text); text-decoration: none; font-weight: 500; }
 .task .title:hover { color: var(--accent-light); }
-.task .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.task .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 4px; }
 .task .actions { display: flex; gap: 6px; }
 .task form { display: inline; margin: 0; }
 
@@ -203,19 +203,23 @@ table.report tr.self td:first-child { color: var(--accent-light); }
 .cta { margin: 40px 0 8px; }
 .foot { margin-top: 48px; }
 
-/* ── the description under the title: two lines, then all of it ── */
-.descbox { margin: 6px 0 8px; }
+/* ── the description under the title ── */
+.descbox { margin: 3px 0 0; }
 .desclabel {
   background: none; border: none; padding: 0; cursor: pointer;
-  color: var(--muted-3); font: inherit; font-size: 11px;
-  text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted-3); font: inherit; font-size: 10px;
+  text-transform: uppercase; letter-spacing: .05em; line-height: 1.4;
 }
 .desclabel:hover, .desclabel.open { color: var(--accent-light); }
 .task .desc {
-  margin: 2px 0 0; padding-left: 10px;
+  margin: 1px 0 0; padding-left: 9px;
   border-left: 2px solid var(--border);
-  color: var(--muted); font-size: 14px; white-space: pre-wrap;
+  color: var(--muted); font-size: 13.5px; line-height: 1.45;
 }
+/* white-space belongs on the text, not on its container: on the container it
+   also renders the template's own indentation, which is where the empty line
+   above the description and the indent on its first line came from. */
+.task .desc .short, .task .desc .full { white-space: pre-line; }
 .desclabel .chev {
   display: inline-block; transition: transform .12s ease;
 }
@@ -223,7 +227,7 @@ table.report tr.self td:first-child { color: var(--accent-light); }
 .desclabel.flat { cursor: default; }
 
 /* ── one row of pills per kind ── */
-.meta.when, .meta.tagsrow, .meta.sizerow { margin-top: 4px; }
+.meta.when, .meta.tagsrow, .meta.sizerow { margin-top: 3px; }
 .meta.when:empty, .meta.tagsrow:empty, .meta.sizerow:empty { display: none; }
 .pill.contact { border-color: var(--muted-3); }
 
@@ -293,3 +297,13 @@ dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }
 .contactrow { display: flex; flex-wrap: wrap; align-items: center; }
 .contactrow input[name="reason"] { flex: 2; min-width: 180px; }
 .links li, .contacts li { align-items: center; }
+
+/* ── the earmark: a private dot, one per person ── */
+.earmark {
+  background: none; border: none; cursor: pointer; padding: 0 2px;
+  font-size: 11px; line-height: 1.6; color: var(--muted-3);
+  transition: color .12s ease, transform .12s ease;
+}
+.earmark:hover { color: var(--warn); transform: scale(1.25); }
+.earmark.on { color: var(--warn); }
+.pill.mark.on { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }

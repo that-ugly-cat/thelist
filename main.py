@@ -41,10 +41,11 @@ from auth import (
 from models import (
     DEFAULT_EFFORT, EFFORTS, EFFORT_LABELS, EFFORT_WEIGHTS, NOTIFICATIONS,
     NOTIFICATION_LABELS, ROLE_LABELS, STATUS_LABELS,
-    ApiKey, Contact, Event, Invitation, Link, Membership, Note,
+    ApiKey, Contact, Earmark, Event, Invitation, Link, Membership, Note,
     NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
-    active_tasks, add_contact, add_link, apply_order, ensure_one_admin, ensure_workspace,
+    active_tasks, add_contact, add_link, apply_order, earmarked_ids,
+    toggle_earmark, ensure_one_admin, ensure_workspace,
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
     normalise, people_of, person_for_proposal, reopen, report, role_for,
@@ -458,6 +459,10 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
         except ValueError:
             pass
 
+    marked = earmarked_ids(db, ws, acc.user)
+    if request.query_params.get("marked"):
+        rows = [t for t in rows if t.id in marked]
+
     if view == "due":
         # A reading of the same table, never a rewrite of `position`. Tasks with
         # no date do not appear here, which is exactly why this is not the
@@ -466,7 +471,8 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
 
     return templates.TemplateResponse(request, "board.html", _ctx(
         db, acc, tasks=rows, view=view, tag=tag, person=person, archive=archive,
-        people=people_of(db, ws), tags=tags_of(db, ws), self_id=self_person(db, ws).id))
+        people=people_of(db, ws), tags=tags_of(db, ws), self_id=self_person(db, ws).id,
+        marked=marked, only_marked=bool(request.query_params.get("marked"))))
 
 
 @app.get("/app/{workspace_id}/task/{task_id}", response_class=HTMLResponse)
@@ -474,8 +480,11 @@ async def task_panel(request: Request, task_id: int,
                      acc: WorkspaceAccess = Depends(workspace_dep("editor")),
                      db: Session = Depends(get_db)):
     t = _visible_task(db, acc, task_id)
+    # Newest first: on a task that has been going for weeks, the note you need is
+    # the last one written, and scrolling past a month of history to reach it is
+    # the kind of friction that stops people writing notes at all.
     notes = (db.query(Note).filter(Note.task_id == t.id, Note.deleted_at.is_(None))
-               .order_by(Note.created_at).all())
+               .order_by(Note.created_at.desc()).all())
     events = (db.query(Event).filter(Event.task_id == t.id)
                 .order_by(Event.created_at.desc()).limit(12).all())
     return templates.TemplateResponse(request, "_panel.html", _ctx(
@@ -701,6 +710,21 @@ async def delete_task_contact(contact_id: int,
     db.delete(c)
     db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}#task-{task_id}", status_code=302)
+
+
+@app.post("/app/{workspace_id}/tasks/{task_id}/earmark")
+async def earmark(task_id: int, acc: WorkspaceAccess = Depends(workspace_dep("editor")),
+                  db: Session = Depends(get_db)):
+    """Toggle the private dot. Either role, and **no event is logged**.
+
+    That omission is the feature: a mark that gets counted is a commitment, and
+    this one is meant to be used carelessly. It is also per-user — nobody sees
+    anybody else's.
+    """
+    t = _visible_task(db, acc, task_id)
+    on = toggle_earmark(db, t, acc.user)
+    db.commit()
+    return {"on": on}
 
 
 @app.post("/app/{workspace_id}/order")

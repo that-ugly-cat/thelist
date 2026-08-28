@@ -168,6 +168,7 @@
         // load time has to be wired again here. Today that is the tag widget;
         // the rule is that this line goes with any widget added to the panel.
         dlg.querySelectorAll("[data-taginput]").forEach(initTags);
+        wireModalForms(dlg, url);
         dlg.showModal();
         // A click on the backdrop closes it: the dialog element itself covers
         // only the panel, so a click landing on <dialog> is a click outside.
@@ -178,11 +179,59 @@
   }
 
   function closeTask(dlg) {
+    const touched = dlg.dataset.touched === "1";
     dlg.close();
     dlg.remove();
-    // Reload once, because everything inside the modal is a form that changed
-    // something behind it — a stale list under a closed dialog is a lie.
-    location.reload();
+    // Reload only if something actually changed while it was open: a stale list
+    // under a closed dialog is a lie, but reloading after a pure read throws
+    // away the scroll position for nothing.
+    if (touched) location.reload();
+  }
+
+  // ── forms inside the task modal submit without closing it ──
+  //
+  // Every one of them used to POST normally, which meant a redirect, a full page
+  // load, and the modal gone — so adding three notes meant reopening the task
+  // three times. Now the submit goes out by fetch and the panel is re-rendered
+  // in place from the same URL that drew it.
+  //
+  // The list underneath is left stale on purpose and refreshed on close: it is
+  // behind a modal nobody can see through, and reloading it under the dialog
+  // would be work done for a view that is covered.
+  function wireModalForms(dlg, url) {
+    dlg.addEventListener("submit", (e) => {
+      const form = e.target;
+      if (!(form instanceof HTMLFormElement)) return;
+      e.preventDefault();
+      const body = new URLSearchParams(new FormData(form));
+      fetch(form.action, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+        redirect: "follow",
+      })
+        .then((r) => {
+          if (!r.ok) return r.text().then((t) => Promise.reject(t));
+          dlg.dataset.touched = "1";
+          return fetch(url, { headers: { "X-Requested-With": "fetch" } });
+        })
+        .then((r) => r.text())
+        .then((html) => {
+          dlg.innerHTML = html;
+          dlg.querySelectorAll("[data-taginput]").forEach(initTags);
+        })
+        .catch((detail) => {
+          // The server refuses for reasons a person can act on — an empty note,
+          // a link with no address, a reason missing on a decline. Say it inside
+          // the modal instead of leaving the click looking ignored.
+          const msg = dlg.querySelector(".formerr") || document.createElement("p");
+          msg.className = "err formerr";
+          msg.textContent = String(detail).replace(/<[^>]*>/g, "").slice(0, 300)
+                            || "That did not go through.";
+          const head = dlg.querySelector(".panelhead");
+          if (head && !msg.parentNode) head.after(msg);
+        });
+    });
   }
 
   // ── the large editor ──
@@ -239,6 +288,17 @@
     if (opener) {
       e.preventDefault();
       openTask(opener.dataset.panel);
+      return;
+    }
+    const mark = e.target.closest("[data-earmark]");
+    if (mark) {
+      e.preventDefault();
+      fetch(mark.dataset.earmark, { method: "POST" })
+        .then((r) => r.json())
+        .then((d) => {
+          mark.classList.toggle("on", d.on);
+          mark.setAttribute("aria-pressed", String(d.on));
+        });
       return;
     }
     const opener2 = e.target.closest("[data-open]");
