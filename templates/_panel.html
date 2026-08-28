@@ -116,7 +116,12 @@
     <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}" class="taskform">
       <label>Title <input name="title" value="{{ task.title }}" required></label>
       <label>For <input name="for_person" list="people" value="{{ task.person.display_name if task.person else ws.owner.label }}"></label>
-      <label>Tags <input name="tags" list="tagnames" placeholder="project X, lab Y" value="{{ task.tag_list | map(attribute='display_name') | join(', ') }}"></label>
+      <label>Tags
+        <span class="taginput" data-taginput>
+          <input type="text" class="tagentry" list="tagnames" placeholder="project X, lab Y">
+          <input type="hidden" name="tags" value="{{ task.tag_list | map(attribute='display_name') | join(', ') }}">
+        </span>
+      </label>
       <div class="row">
         <label>Size
           <select name="effort">

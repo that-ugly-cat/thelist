@@ -75,17 +75,83 @@
       });
   }
 
-  // ── the description: two lines, then all of it ──
-  // Clamped rather than hidden, so the description is visible without asking —
-  // an expander you have to discover is a description nobody reads.
+  // ── the description: 180 characters, then all of it ──
+  // Cut on characters and not on rendered lines, because a line is however much
+  // fits in the window: the same task read as three words on a phone and as a
+  // paragraph on a desktop. Both halves are in the DOM and the button swaps
+  // them, so opening costs no request.
   function expand(btn) {
     const box = btn.closest(".descbox");
-    const body = box && box.querySelector(".desc");
-    if (!body) return;
-    const open = body.classList.toggle("clamped") === false;
-    btn.classList.toggle("open", open);
-    btn.textContent = open ? "description ▾" : "description";
+    if (!box) return;
+    const short = box.querySelector(".short");
+    const full = box.querySelector(".full");
+    if (!short || !full) return;
+    const opening = full.classList.contains("hidden");
+    full.classList.toggle("hidden", !opening);
+    short.classList.toggle("hidden", opening);
+    btn.classList.toggle("open", opening);
   }
+
+  // ── tags as pills, WordPress-style ──
+  //
+  // A comma turns what precedes it into a pill; backspace on an empty box takes
+  // the last one back. The hidden field carries the comma-joined value, so the
+  // server keeps receiving exactly the string it received before and nothing
+  // downstream had to change — the widget is a way of typing, not a new format.
+  //
+  // Whatever is still in the box when the form is submitted counts as a tag:
+  // typing a name and pressing Add should not silently drop it because no comma
+  // was typed after it.
+  function initTags(box) {
+    const entry = box.querySelector(".tagentry");
+    const hidden = box.querySelector('input[type="hidden"]');
+    let tags = (hidden.value || "").split(",").map((t) => t.trim()).filter(Boolean);
+
+    function sync() {
+      hidden.value = tags.join(", ");
+      box.querySelectorAll(".tagpill").forEach((p) => p.remove());
+      tags.forEach((t, i) => {
+        const pill = document.createElement("span");
+        pill.className = "pill tag tagpill";
+        pill.textContent = t;
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "tagx";
+        x.textContent = "×";
+        x.addEventListener("click", () => { tags.splice(i, 1); sync(); });
+        pill.appendChild(x);
+        box.insertBefore(pill, entry);
+      });
+    }
+
+    function commit(raw) {
+      raw.split(",").map((t) => t.trim()).filter(Boolean).forEach((t) => {
+        if (!tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.push(t);
+      });
+      entry.value = "";
+      sync();
+    }
+
+    entry.addEventListener("keydown", (e) => {
+      if (e.key === "," || e.key === "Enter") {
+        // Enter must not submit the form from inside the tag box: people press
+        // it expecting to end a tag, not to save half a task.
+        e.preventDefault();
+        commit(entry.value);
+      } else if (e.key === "Backspace" && !entry.value && tags.length) {
+        tags.pop();
+        sync();
+      }
+    });
+    // A datalist pick fires input, not keydown, and arrives with no comma.
+    entry.addEventListener("change", () => { if (entry.value) commit(entry.value); });
+    entry.addEventListener("blur", () => { if (entry.value) commit(entry.value); });
+    const form = box.closest("form");
+    if (form) form.addEventListener("submit", () => { if (entry.value) commit(entry.value); });
+    sync();
+  }
+
+  document.querySelectorAll("[data-taginput]").forEach(initTags);
 
   // ── one task, in a modal ──
   // Wide, because a task holds notes, links and contacts, and a 380px column
@@ -98,6 +164,10 @@
         dlg.className = "taskmodal";
         dlg.innerHTML = html;
         document.body.appendChild(dlg);
+        // The panel arrives after start-up, so anything that had to be wired at
+        // load time has to be wired again here. Today that is the tag widget;
+        // the rule is that this line goes with any widget added to the panel.
+        dlg.querySelectorAll("[data-taginput]").forEach(initTags);
         dlg.showModal();
         // A click on the backdrop closes it: the dialog element itself covers
         // only the panel, so a click landing on <dialog> is a click outside.
@@ -169,6 +239,24 @@
     if (opener) {
       e.preventDefault();
       openTask(opener.dataset.panel);
+      return;
+    }
+    const opener2 = e.target.closest("[data-open]");
+    if (opener2) {
+      e.preventDefault();
+      const dlg = document.getElementById(opener2.dataset.open);
+      if (dlg) {
+        dlg.showModal();
+        dlg.addEventListener("click", (ev) => { if (ev.target === dlg) dlg.close(); },
+                             { once: true });
+      }
+      return;
+    }
+    const dismiss = e.target.closest("[data-dismiss]");
+    if (dismiss) {
+      e.preventDefault();
+      const dlg = dismiss.closest("dialog");
+      if (dlg) dlg.close();
       return;
     }
     const closer = e.target.closest("[data-close]");

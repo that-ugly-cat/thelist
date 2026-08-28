@@ -153,10 +153,34 @@ async def lifespan(app: FastAPI):
 
 
 BASE = Path(__file__).parent
+
+
+def _asset_version() -> str:
+    """A stamp for the static URLs, from the newest file on disk.
+
+    Without it the browser is free to keep serving yesterday's CSS and JS:
+    StaticFiles sends ETag and Last-Modified but no Cache-Control, and in that
+    silence browsers apply heuristic caching and skip revalidating entirely.
+
+    That is not a theoretical inconvenience — it cost a whole round trip on
+    28 Aug 2026. A cached list.js from before the layout change went looking for
+    an element that no longer existed, threw, and took every click handler on the
+    page down with it: the task modal "did not open", and the description
+    expander had "not worked" the day before for the same reason. The page said
+    nothing, because a dead listener looks exactly like a page with no listeners.
+    """
+    newest = 0.0
+    for f in (BASE / "static").rglob("*"):
+        if f.is_file():
+            newest = max(newest, f.stat().st_mtime)
+    return str(int(newest))
+
+
 app = FastAPI(title="TheList", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.globals.update(
+    ASSETS=_asset_version(),
     EFFORTS=EFFORTS, EFFORT_LABELS=EFFORT_LABELS, EFFORT_WEIGHTS=EFFORT_WEIGHTS,
     STATUS_LABELS=STATUS_LABELS, ROLE_LABELS=ROLE_LABELS,
     NOTIFICATION_LABELS=NOTIFICATION_LABELS, NOTIFICATIONS=NOTIFICATIONS,
@@ -503,6 +527,10 @@ async def create_task(request: Request,
     db.add(t)
     db.flush()
     set_tags(db, ws, t, form.get("tags", ""))
+    # One contact from the creation form, the rest from the task itself — same
+    # arrangement as links: enough to capture the thing while it is in your head.
+    add_contact(db, t, form.get("contact_name", ""), form.get("contact_email", ""),
+                form.get("contact_reason", ""))
     log_event(db, ws.id, "created" if acc.is_owner else "proposed",
               actor=acc.user, task=t, title=t.title)
 

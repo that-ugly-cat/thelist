@@ -216,12 +216,11 @@ table.report tr.self td:first-child { color: var(--accent-light); }
   border-left: 2px solid var(--border);
   color: var(--muted); font-size: 14px; white-space: pre-wrap;
 }
-/* Clamped, not hidden: two lines are readable without asking for them, and an
-   expander you have to discover is a description nobody reads. */
-.task .desc.clamped {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden;
+.desclabel .chev {
+  display: inline-block; transition: transform .12s ease;
 }
+.desclabel.open .chev { transform: rotate(90deg); }
+.desclabel.flat { cursor: default; }
 
 /* ── one row of pills per kind ── */
 .meta.when, .meta.tagsrow, .meta.sizerow { margin-top: 4px; }
@@ -263,3 +262,27 @@ dialog.bigeditor {
 dialog.bigeditor::backdrop { background: rgba(0, 0, 0, .6); }
 dialog.bigeditor h3 { margin-top: 0; }
 dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }
+
+/* ── the list uses the whole width now that creating happens in a modal ── */
+.listcol.wide { max-width: 900px; }
+.newrow { margin: 4px 0 14px; }
+.inlinecheck { align-self: end; padding-bottom: 8px; }
+
+/* ── tags typed as pills ── */
+.taginput {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 4px; padding: 5px 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+}
+.taginput:focus-within { border-color: var(--accent); }
+.taginput .tagentry {
+  flex: 1; min-width: 120px; margin: 0; padding: 2px 0;
+  border: none; background: none;
+}
+.taginput .tagentry:focus { outline: none; }
+.tagpill { display: inline-flex; align-items: center; gap: 5px; }
+.tagx {
+  background: none; border: none; color: var(--muted-3); cursor: pointer;
+  font: inherit; font-size: 13px; line-height: 1; padding: 0;
+}
+.tagx:hover { color: var(--danger); }

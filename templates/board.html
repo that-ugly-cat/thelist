@@ -38,8 +38,13 @@
   {% endif %}
 </div>
 
-<div class="split">
-<div class="listcol">
+<p class="newrow">
+  <button class="btn" type="button" data-open="newtask">
+    {% if is_owner %}+ Add to the list{% else %}+ Propose a task{% endif %}
+  </button>
+</p>
+
+<div class="listcol wide">
   {% if not tasks %}
     <p class="empty">{% if archive %}Nothing archived yet.{% else %}Nothing on the list.{% endif %}</p>
   {% endif %}
@@ -60,9 +65,22 @@
         <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
 
         {% if t.description %}
+          {# Cut on characters, not on rendered lines: a line depends on the
+             width of the window, so the same task showed three words on a phone
+             and a paragraph on a desktop. 180 characters is 180 characters. #}
+          {% set long = t.description|length > 180 %}
           <div class="descbox">
-            <button class="desclabel" type="button" data-expand>description</button>
-            <div class="desc clamped">{{ t.description }}</div>
+            {% if long %}
+              <button class="desclabel" type="button" data-expand>
+                <span class="chev">›</span> description
+              </button>
+            {% else %}
+              <span class="desclabel flat">description</span>
+            {% endif %}
+            <div class="desc">
+              <span class="short">{{ t.description[:180] }}{% if long %}…{% endif %}</span>
+              {% if long %}<span class="full hidden">{{ t.description }}</span>{% endif %}
+            </div>
           </div>
         {% endif %}
 
@@ -126,47 +144,69 @@
   </p>
 </div>
 
-<aside class="panel">
+<dialog class="taskmodal" id="newtask">
   <div class="panelbody">
-    <h2>{% if is_owner %}Add to the list{% else %}Propose a task{% endif %}</h2>
+    <div class="panelhead">
+      <h2>{% if is_owner %}Add to the list{% else %}Propose a task{% endif %}</h2>
+      <button class="mini" type="button" data-dismiss>×</button>
+    </div>
     {% if not is_owner %}
       <p class="muted small">The owner accepts or declines it. You will hear either way.</p>
     {% endif %}
     <form method="post" action="/app/{{ ws.id }}/tasks" class="taskform">
-      <label>Title <input name="title" required maxlength="200"></label>
+      <label>Title <input name="title" required maxlength="200" autofocus></label>
       {# Filled in rather than hinted: on your own board the answer is you, and
          proposing on somebody else's it is you again. It stays a field because
          it answers "for whom does this exist", and the honest answer is
          sometimes a third person who asked for it — which is the whole reason
          the report can tell your work from theirs. #}
-      <label>For
-        <input name="for_person" list="people"
-               value="{{ ws.owner.label if is_owner else user.label }}">
-      </label>
-      <label>Tags <input name="tags" list="tagnames" placeholder="project X, lab Y"></label>
       <div class="row">
+        <label>For
+          <input name="for_person" list="people"
+                 value="{{ ws.owner.label if is_owner else user.label }}">
+        </label>
         <label>Size
           <select name="effort">
             {% for e in EFFORTS %}<option value="{{ e }}" {% if e == 'M' %}selected{% endif %}>{{ e }} — {{ EFFORT_LABELS[e] }}</option>{% endfor %}
           </select>
         </label>
-        <label>Due <input type="date" name="due_date"></label>
       </div>
-      <label class="check"><input type="checkbox" name="recurring" value="1"> Recurring — every so often, no end date</label>
-      <label>Description <textarea name="description" rows="3"></textarea></label>
+
+      <label>Tags
+        <span class="taginput" data-taginput>
+          <input type="text" class="tagentry" list="tagnames" placeholder="project X, lab Y">
+          <input type="hidden" name="tags" value="">
+        </span>
+      </label>
+
+      <div class="row">
+        <label>Due <input type="date" name="due_date"></label>
+        <label class="check inlinecheck"><input type="checkbox" name="recurring" value="1"> Recurring, no end date</label>
+      </div>
+
+      <label>Description <textarea name="description" rows="4"></textarea></label>
+
       <div class="row">
         <label>Link <input name="link_url" placeholder="https://…"></label>
         <label>Label <input name="link_label" placeholder="PaperTrail"></label>
       </div>
-      <p class="muted small">One link here; more links and contacts from the task itself.</p>
+
+      <h3>Relevant contact</h3>
+      <p class="muted small">Somebody to talk to about this — not who it is for.</p>
+      <div class="row">
+        <label>Name <input name="contact_name" placeholder="who"></label>
+        <label>Email <input type="email" name="contact_email" placeholder="them@example.org"></label>
+      </div>
+      <label>Reason <input name="contact_reason" placeholder="what they have to do with this"></label>
+
+      <p class="muted small">More links and contacts from the task itself.</p>
       <button class="btn" type="submit">{% if is_owner %}Add{% else %}Propose{% endif %}</button>
     </form>
   </div>
-</aside>
-</div>
+</dialog>
 
 <datalist id="people">{% for p in people %}<option value="{{ p.display_name }}">{% endfor %}</datalist>
 <datalist id="tagnames">{% for t in tags %}<option value="{{ t.display_name }}">{% endfor %}</datalist>
 
-<script src="/static/js/list.js"></script>
+<script src="/static/js/list.js?v={{ ASSETS }}"></script>
 {% endblock %}
