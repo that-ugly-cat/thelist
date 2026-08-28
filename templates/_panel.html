@@ -12,6 +12,9 @@
     <span class="pill effort e{{ task.effort }}">{{ task.effort }} — {{ EFFORT_LABELS[task.effort] }}</span>
     {% if task.recurring %}<span class="pill rec">recurring</span>{% endif %}
     {% if task.due_date %}<span class="pill due">{{ task.due_date.isoformat() }}</span>{% endif %}
+    {% for l in task.links %}
+      <a class="pill link" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.text }}</a>
+    {% endfor %}
   </div>
 
   {% if task.description %}<p class="desc">{{ task.description }}</p>{% endif %}
@@ -42,16 +45,45 @@
   </ul>
 
   <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}/notes" class="noteform">
-    <textarea name="body" rows="2" placeholder="Add a note — it cannot be edited afterwards" required></textarea>
-    <button class="btn small" type="submit">Add note</button>
+    <textarea name="body" id="note-{{ task.id }}" rows="2"
+              placeholder="Add a note — it cannot be edited afterwards" required></textarea>
+    <div class="btnrow">
+      <button class="btn small" type="submit">Add note</button>
+      <button class="btn small ghost" type="button"
+              data-bigeditor="/app/{{ ws.id }}/tasks/{{ task.id }}/notes"
+              data-from="note-{{ task.id }}">Large editor</button>
+    </div>
   </form>
+
+  <h3>Links</h3>
+  {% if not task.links %}<p class="muted small">None.</p>{% endif %}
+  <ul class="links">
+    {% for l in task.links %}
+      <li>
+        <a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.text }}</a>
+        <span class="muted small">{{ l.url }}</span>
+        {% if is_owner %}
+          <form method="post" action="/app/{{ ws.id }}/links/{{ l.id }}/delete">
+            <button class="mini danger" title="Remove this link">×</button>
+          </form>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% if is_owner %}
+    <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}/links" class="inline">
+      <input name="url" placeholder="https://…" required>
+      <input name="label" placeholder="what it is">
+      <button class="btn small">Add link</button>
+    </form>
+  {% endif %}
 
   {% if is_owner %}
     <h3>Edit</h3>
     <form method="post" action="/app/{{ ws.id }}/tasks/{{ task.id }}" class="taskform">
       <label>Title <input name="title" value="{{ task.title }}" required></label>
       <label>For <input name="for_person" list="people" value="{{ task.person.display_name if task.person else '' }}"></label>
-      <label>Tags <input name="tags" list="tagnames" value="{{ task.tag_list | map(attribute='display_name') | join(', ') }}"></label>
+      <label>Tags <input name="tags" list="tagnames" placeholder="project X, lab Y" value="{{ task.tag_list | map(attribute='display_name') | join(', ') }}"></label>
       <div class="row">
         <label>Size
           <select name="effort">
@@ -62,10 +94,6 @@
       </div>
       <label class="check"><input type="checkbox" name="recurring" value="1" {% if task.recurring %}checked{% endif %}> Recurring</label>
       <label>Description <textarea name="description" rows="3">{{ task.description }}</textarea></label>
-      <div class="row">
-        <label>Link <input name="link_url" value="{{ task.link_url }}"></label>
-        <label>Label <input name="link_label" value="{{ task.link_label }}"></label>
-      </div>
       <button class="btn" type="submit">Save</button>
     </form>
   {% endif %}

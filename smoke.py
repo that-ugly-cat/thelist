@@ -246,6 +246,57 @@ def main_() -> int:
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
 
+        print("\n— a task points at more than one thing —")
+        from models import Link, migrate_links
+        db = SessionLocal()
+        legacy = db.query(Task).get(task_id)
+        legacy.link_url, legacy.link_label = "example.org/paper", "The paper"
+        db.commit()
+        moved = migrate_links(db)
+        db.commit()
+        check("the old single link is migrated onto the table", moved == 1, str(moved))
+        legacy = db.query(Task).get(task_id)
+        check("...with its label kept", legacy.links[0].label == "The paper")
+        check("...and the old columns emptied", legacy.link_url == "")
+        check("running the migration twice adds nothing", migrate_links(db) == 0)
+        db.close()
+
+        # A task of its own: the soft-delete section above took `task_id` off
+        # the board, and a deleted task is invisible to every route by design.
+        O.post(f"/app/{ws_id}/tasks", data={"title": "Linked thing", "effort": "M"},
+               follow_redirects=False)
+        db = SessionLocal()
+        linked_id = db.query(Task).filter(Task.title == "Linked thing").first().id
+        db.close()
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/links",
+                   data={"url": "docs.example.org/folder", "label": "Folder"},
+                   follow_redirects=False)
+        check("the owner can add a second link", r.status_code == 302)
+        db = SessionLocal()
+        t = db.query(Task).get(linked_id)
+        check("a task can hold several", len(t.links) == 1, str(len(t.links)))
+        check("a missing scheme is filled in",
+              t.links[0].url.startswith("https://"), t.links[0].url)
+        check("a link with no label shows a short form of the address",
+              Link(url="https://example.org/" + "x" * 90).text.endswith("…"))
+        link_id = t.links[0].id
+        db.close()
+        r = E.post(f"/app/{ws_id}/tasks/{linked_id}/links", data={"url": "x.org"},
+                   follow_redirects=False)
+        check("an editor cannot add links", r.status_code == 404)
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/links", data={"url": "  "},
+                   follow_redirects=False)
+        check("a link with no address is refused", r.status_code == 400)
+        r = O.post(f"/app/{ws_id}/links/{link_id}/delete", follow_redirects=False)
+        check("...and one can be removed", r.status_code == 302)
+        r = O.post(f"/app/{ws_id}/tasks/{linked_id}/links",
+                   data={"url": "https://example.org/second"}, follow_redirects=False)
+        db = SessionLocal()
+        check("and the ones left keep their order",
+              [l.url for l in db.query(Task).get(linked_id).links]
+              == ["https://example.org/second"])
+        db.close()
+
         print("\n— the owner is a person with a name, not 'Me' —")
         from models import Person, self_person, Workspace as _WS
         db = SessionLocal()

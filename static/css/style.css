@@ -202,3 +202,36 @@ table.report tr.self td:first-child { color: var(--accent-light); }
 .cards .card p { color: var(--muted-2); font-size: 14px; margin: 0; }
 .cta { margin: 40px 0 8px; }
 .foot { margin-top: 48px; }
+
+/* ── the description expander on a row ── */
+.task .titleline { display: flex; align-items: baseline; gap: 8px; }
+.twist {
+  background: none; border: none; color: var(--muted-3); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0; width: 12px;
+  transition: transform .12s ease, color .12s ease;
+}
+.twist:hover { color: var(--accent-light); }
+.twist.open { transform: rotate(90deg); color: var(--muted); }
+.twist.off { cursor: default; }
+.task .desc {
+  margin: 8px 0 2px 20px; padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--muted); font-size: 14px; white-space: pre-wrap;
+}
+
+/* ── links on a task ── */
+.links { list-style: none; margin: 0 0 8px; padding: 0; }
+.links li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.links li form { margin: 0; }
+.links li .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+
+/* ── the large editor ── */
+.btnrow { display: flex; gap: 8px; align-items: center; }
+dialog.bigeditor {
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  width: min(760px, 92vw); padding: 20px;
+}
+dialog.bigeditor::backdrop { background: rgba(0, 0, 0, .6); }
+dialog.bigeditor h3 { margin-top: 0; }
+dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }

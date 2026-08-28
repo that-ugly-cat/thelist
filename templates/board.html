@@ -55,7 +55,19 @@
       {% endif %}
 
       <div class="body">
-        <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
+        <div class="titleline">
+          {# The expander is a button and not a <details>: the row is draggable,
+             and a summary inside a draggable element is where browsers disagree
+             with each other. It is only drawn when there is something under it,
+             so an empty chevron never promises a description that is not there. #}
+          {% if t.description %}
+            <button class="twist" type="button" data-expand="desc-{{ t.id }}"
+                    aria-expanded="false" title="Show the description">›</button>
+          {% else %}
+            <span class="twist off"></span>
+          {% endif %}
+          <a class="title" href="#" data-panel="/app/{{ ws.id }}/task/{{ t.id }}">{{ t.title }}</a>
+        </div>
         <div class="meta">
           {% if t.for_person_id != self_id and t.person %}
             <span class="pill who">for {{ t.person.display_name }}</span>
@@ -73,8 +85,13 @@
             <span class="muted small">last done {{ t.last_done_at.date().isoformat() }}</span>
           {% endif %}
           {% if t.done_at %}<span class="muted small">done {{ t.done_at.date().isoformat() }}</span>{% endif %}
-          {% if t.link_url %}<a class="pill link" href="{{ t.link_url }}" target="_blank" rel="noopener">{{ t.link_label or 'link' }}</a>{% endif %}
+          {% for l in t.links %}
+            <a class="pill link" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.text }}</a>
+          {% endfor %}
         </div>
+        {% if t.description %}
+          <div class="desc hidden" id="desc-{{ t.id }}">{{ t.description }}</div>
+        {% endif %}
       </div>
 
       <div class="actions">
@@ -114,7 +131,7 @@
       <label>For
         <input name="for_person" list="people" placeholder="{{ ws.owner.label if is_owner else user.label }}">
       </label>
-      <label>Tags <input name="tags" list="tagnames" placeholder="BAG, ITE"></label>
+      <label>Tags <input name="tags" list="tagnames" placeholder="project X, lab Y"></label>
       <div class="row">
         <label>Size
           <select name="effort">
@@ -129,6 +146,7 @@
         <label>Link <input name="link_url" placeholder="https://…"></label>
         <label>Label <input name="link_label" placeholder="PaperTrail"></label>
       </div>
+      <p class="muted small">One link here; add the others from the task itself.</p>
       <button class="btn" type="submit">{% if is_owner %}Add{% else %}Propose{% endif %}</button>
     </form>
   </div>

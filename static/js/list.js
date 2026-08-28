@@ -77,7 +77,67 @@
       });
   }
 
+  // ── the description expander ──
+  // A button rather than <details>: the row it lives in is draggable, and a
+  // <summary> inside a draggable element is where browsers stop agreeing.
+  function toggle(btn) {
+    const body = document.getElementById(btn.dataset.expand);
+    if (!body) return;
+    const open = body.classList.toggle("hidden") === false;
+    btn.setAttribute("aria-expanded", String(open));
+    btn.classList.toggle("open", open);
+  }
+
+  // ── the large editor ──
+  // A dialog with its own form posting to the same endpoint, and the text
+  // carried across on open. Sharing one textarea between the two sizes would
+  // mean moving a live element in and out of a dialog, which loses focus,
+  // selection and — in the failure case that matters — whatever was typed.
+  function bigEditor(btn) {
+    const small = document.getElementById(btn.dataset.from);
+    const dlg = document.createElement("dialog");
+    dlg.className = "bigeditor";
+    dlg.innerHTML =
+      '<form method="post" class="bigform">' +
+      '  <h3>Note</h3>' +
+      '  <textarea name="body" rows="18" required></textarea>' +
+      '  <p class="muted small">Notes cannot be edited afterwards. ' +
+      '     Write something you are willing to leave standing.</p>' +
+      '  <div class="btnrow">' +
+      '    <button class="btn" type="submit">Add note</button>' +
+      '    <button class="btn ghost" type="button" data-cancel>Cancel</button>' +
+      '  </div>' +
+      "</form>";
+    const form = dlg.querySelector("form");
+    const big = dlg.querySelector("textarea");
+    form.action = btn.dataset.bigeditor;
+    big.value = small ? small.value : "";
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    big.focus();
+    // Carry the text back on the way out, so a cancel does not lose the draft.
+    const close = () => {
+      if (small) small.value = big.value;
+      dlg.close();
+      dlg.remove();
+    };
+    dlg.querySelector("[data-cancel]").addEventListener("click", close);
+    dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); close(); });
+  }
+
   document.addEventListener("click", (e) => {
+    const expander = e.target.closest("[data-expand]");
+    if (expander) {
+      e.preventDefault();
+      toggle(expander);
+      return;
+    }
+    const big = e.target.closest("[data-bigeditor]");
+    if (big) {
+      e.preventDefault();
+      bigEditor(big);
+      return;
+    }
     const opener = e.target.closest("[data-panel]");
     if (opener) {
       e.preventDefault();

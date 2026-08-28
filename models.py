@@ -221,6 +221,9 @@ class Task(Base):
     # confused (SPEC.md §3.5).
     assignee_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
+    # Legacy: the single-link columns, kept because migrations here are additive
+    # only and dropping a column in SQLite means rebuilding the table. They are
+    # emptied by migrate_links() at startup and nothing reads them any more.
     link_url = Column(String, default="", nullable=False)
     link_label = Column(String, default="", nullable=False)
 
@@ -239,10 +242,40 @@ class Task(Base):
     person = relationship("Person", foreign_keys=[for_person_id])
     creator = relationship("User", foreign_keys=[created_by])
     tags = relationship("TaskTag", cascade="all, delete-orphan")
+    links = relationship("Link", cascade="all, delete-orphan",
+                         order_by="Link.position, Link.id")
 
     @property
     def tag_list(self):
         return sorted((tt.tag for tt in self.tags), key=lambda t: t.name)
+
+
+class Link(Base):
+    """A task can point at more than one thing, so links are rows.
+
+    They started as two columns on `tasks` — one url, one label — which is the
+    shape you pick when you imagine a task pointing at *the* paper. Real ones
+    point at the paper, the shared folder and the thread where it was discussed.
+    """
+    __tablename__ = "links"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    url = Column(String, nullable=False)
+    label = Column(String, default="", nullable=False)
+    position = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+
+    @property
+    def text(self) -> str:
+        """What to show: the label, or something short from the URL rather than
+        the whole thing — a bare 90-character URL in a pill wrecks the row."""
+        # `or ""`: a column default is applied at flush, so a Link that has just
+        # been constructed still has None here — and that is exactly the object a
+        # template renders when showing what was just added.
+        if (self.label or "").strip():
+            return self.label.strip()
+        bare = (self.url or "").split("://", 1)[-1]
+        return bare[:32] + ("…" if len(bare) > 32 else "")
 
 
 class Note(Base):
@@ -762,6 +795,37 @@ def report(db, ws: Workspace, start: datetime, end: datetime) -> dict:
 _MIGRATIONS = [
     # ("tasks", "some_new_column TEXT DEFAULT ''"),
 ]
+
+
+def migrate_links(db) -> int:
+    """Move the old single link onto the links table. Idempotent.
+
+    Runs at startup rather than as a one-off script, because a one-off script is
+    a thing somebody has to remember to run on a box they are not looking at.
+    """
+    moved = 0
+    rows = (db.query(Task)
+              .filter(Task.link_url != "", Task.link_url.isnot(None)).all())
+    for t in rows:
+        if not any(l.url == t.link_url for l in t.links):
+            t.links.append(Link(url=t.link_url, label=t.link_label or "", position=0))
+            moved += 1
+        t.link_url, t.link_label = "", ""
+    return moved
+
+
+def add_link(db, task: Task, url: str, label: str = "") -> Link | None:
+    url = (url or "").strip()
+    if not url:
+        return None
+    if "://" not in url:
+        # A bare domain is what people paste; without a scheme the browser reads
+        # it as a relative path and the link silently goes nowhere.
+        url = "https://" + url
+    top = max([l.position for l in task.links], default=0)
+    link = Link(url=url, label=(label or "").strip(), position=top + 1)
+    task.links.append(link)
+    return link
 
 
 def init_db() -> None:

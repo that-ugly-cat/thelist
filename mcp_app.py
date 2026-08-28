@@ -32,11 +32,11 @@ from mcp.server.mcpserver import MCPServer
 import auth
 import mailer
 from models import (
-    DEFAULT_EFFORT, EFFORTS, EFFORT_WEIGHTS, STATUS_LABELS, Membership, Note,
-    SessionLocal, Task, User, Workspace, active_tasks, get_or_create_person,
-    has_role, log_event, mark_done, next_position, people_of,
-    person_for_proposal, reopen, report, role_for, self_person, set_tags,
-    tags_of, utcnow, workspaces_of,
+    DEFAULT_EFFORT, EFFORTS, EFFORT_WEIGHTS, STATUS_LABELS, Link, Membership,
+    Note, SessionLocal, Task, User, Workspace, active_tasks, add_link,
+    get_or_create_person, has_role, log_event, mark_done, next_position,
+    people_of, person_for_proposal, reopen, report, role_for, self_person,
+    set_tags, tags_of, utcnow, workspaces_of,
 )
 
 mcp = MCPServer(
@@ -146,7 +146,8 @@ def _brief(db, t: Task) -> dict:
         "last_done": t.last_done_at.date().isoformat() if t.last_done_at else None,
         "notes": db.query(Note).filter(Note.task_id == t.id,
                                        Note.deleted_at.is_(None)).count(),
-        "link": t.link_url or None,
+        "links": [{"id": l.id, "url": l.url, "label": l.label or None}
+                  for l in t.links],
     }
 
 
@@ -434,6 +435,8 @@ def add_task(title: str, board: str = "", for_person: str = "", tags: str = "",
                                else person_for_proposal(db, ws, user).id)
         db.add(t)
         db.flush()
+        if link_url.strip():
+            add_link(db, t, link_url, link_label)
         set_tags(db, ws, t, tags)
         log_event(db, ws.id, "created" if is_owner else "proposed",
                   actor=user, task=t, title=t.title, via="mcp")
@@ -452,13 +455,14 @@ def add_task(title: str, board: str = "", for_person: str = "", tags: str = "",
 @mcp.tool()
 def update_task(task_id: int, board: str = "", title: str = "",
                 for_person: str = "", tags: str = "", effort: str = "",
-                due: str = "", description: str = "", link_url: str = "",
+                due: str = "", description: str = "",
                 recurring: str = "", clear: str = "") -> dict:
     """Change a task. Owner only.
 
     Empty means "leave it alone", so a call only touches what it names. To empty
     a field, list it in `clear` instead — a comma-separated set drawn from
-    due, description, tags, link, for.
+    due, description, tags, for. **Links are not here**: a task can have several,
+    so they have their own tools.
 
     `recurring` takes "yes" or "no". `tags` REPLACES the whole set rather than
     adding to it: read the task first if you mean to append.
@@ -498,10 +502,6 @@ def update_task(task_id: int, board: str = "", title: str = "",
                 return _fail("due must be ISO, YYYY-MM-DD")
         elif "due" in wipe:
             t.due_date = None
-        if link_url.strip():
-            t.link_url = link_url.strip()
-        elif "link" in wipe:
-            t.link_url, t.link_label = "", ""
         if for_person.strip():
             p = get_or_create_person(db, ws, for_person)
             if p is not None:
@@ -754,5 +754,54 @@ def restore_task(task_id: int, board: str = "") -> dict:
         log_event(db, ws.id, "restored", actor=user, task=t, via="mcp")
         db.commit()
         return {"restored": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def add_task_link(task_id: int, url: str, label: str = "", board: str = "") -> dict:
+    """Point a task at something. Owner only, and a task may have several.
+
+    `label` is what the link is called on the row — leave it out and a short form
+    of the address is shown instead, because a bare 90-character URL in a pill
+    wrecks the layout. A missing scheme is filled in as https, since a bare
+    domain is what people paste and without one the browser reads it as a
+    relative path and the link goes nowhere.
+    """
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        t = _task(db, ws, task_id)
+        if t is None:
+            return _fail("task not found")
+        link = add_link(db, t, url, label)
+        if link is None:
+            return _fail("a link needs an address")
+        log_event(db, ws.id, "edited", actor=user, task=t, added_link=link.url,
+                  via="mcp")
+        db.commit()
+        return {"added": True, "task": _brief(db, t)}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def remove_task_link(link_id: int, board: str = "") -> dict:
+    """Take one link off a task. Owner only."""
+    db = SessionLocal()
+    try:
+        ws, user, err = _open(db, board, "owner")
+        if err:
+            return err
+        link = (db.query(Link).join(Task, Task.id == Link.task_id)
+                  .filter(Link.id == link_id, Task.workspace_id == ws.id).first())
+        if link is None:
+            return _fail("link not found")
+        task = link.task_id
+        db.delete(link)
+        db.commit()
+        return {"removed": True, "task_id": task}
     finally:
         db.close()

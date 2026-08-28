@@ -41,10 +41,10 @@ from auth import (
 from models import (
     DEFAULT_EFFORT, EFFORTS, EFFORT_LABELS, EFFORT_WEIGHTS, NOTIFICATIONS,
     NOTIFICATION_LABELS, ROLE_LABELS, STATUS_LABELS,
-    ApiKey, Event, Invitation, Membership, Note, NotificationPref, Person,
+    ApiKey, Event, Invitation, Link, Membership, Note, NotificationPref, Person,
     SessionLocal, Task, Tag, User, Workspace,
-    active_tasks, apply_order, ensure_one_admin, ensure_workspace,
-    get_or_create_person, get_db,
+    active_tasks, add_link, apply_order, ensure_one_admin, ensure_workspace,
+    get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
     normalise, people_of, person_for_proposal, reopen, report, role_for,
     self_person, set_tags, tags_of, utcnow, workspaces_of,
@@ -130,9 +130,12 @@ async def lifespan(app: FastAPI):
     try:
         promoted = ensure_one_admin(db)
         if promoted:
-            db.commit()
             log.warning("no administrator existed: promoted %s, the oldest account. "
                         "Change it with admin.py --promote / --demote.", promoted)
+        moved = migrate_links(db)
+        if moved:
+            log.info("moved %d single links onto the links table", moved)
+        db.commit()
     finally:
         db.close()
     task = asyncio.create_task(_due_digest_loop())
@@ -463,8 +466,10 @@ def _read_task_form(db, ws, form: dict, task: Task, actor) -> None:
     task.effort = effort if effort in EFFORTS else DEFAULT_EFFORT
     raw_due = (form.get("due_date") or "").strip()
     task.due_date = date.fromisoformat(raw_due) if raw_due else None
-    task.link_url = (form.get("link_url") or "").strip()
-    task.link_label = (form.get("link_label") or "").strip()
+    # On creation the form offers one link for convenience; more are added from
+    # the task's own panel, where there is room to see them.
+    if not task.id and (form.get("link_url") or "").strip():
+        add_link(db, task, form.get("link_url"), form.get("link_label", ""))
 
     # `for` is mandatory with a default: an optional field a report is built on
     # produces an "unspecified" slice that grows until the chart is useless.
@@ -570,6 +575,33 @@ async def restore_task(task_id: int, acc: WorkspaceAccess = Depends(workspace_de
     log_event(db, acc.workspace.id, "restored", actor=acc.user, task=t)
     db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}?archive=1", status_code=302)
+
+
+@app.post("/app/{workspace_id}/tasks/{task_id}/links")
+async def add_task_link(task_id: int, url: str = Form(...), label: str = Form(""),
+                        acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                        db: Session = Depends(get_db)):
+    t = _visible_task(db, acc, task_id)
+    if add_link(db, t, url, label) is None:
+        raise HTTPException(status_code=400, detail="A link needs an address.")
+    log_event(db, acc.workspace.id, "edited", actor=acc.user, task=t, added_link=url)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}#task-{t.id}", status_code=302)
+
+
+@app.post("/app/{workspace_id}/links/{link_id}/delete")
+async def delete_task_link(link_id: int,
+                           acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                           db: Session = Depends(get_db)):
+    link = (db.query(Link).join(Task, Task.id == Link.task_id)
+              .filter(Link.id == link_id,
+                      Task.workspace_id == acc.workspace.id).first())
+    if link is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    task_id = link.task_id
+    db.delete(link)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}#task-{task_id}", status_code=302)
 
 
 @app.post("/app/{workspace_id}/order")
