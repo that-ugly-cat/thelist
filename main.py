@@ -431,6 +431,9 @@ def _ctx(db: Session, acc: WorkspaceAccess, **extra) -> dict:
                       .filter(Task.workspace_id == acc.workspace.id,
                               Task.status == "proposed",
                               Task.deleted_at.is_(None)).count()),
+        # Whether to draw the Report link. The routes check it too: a hidden
+        # link is decoration, not absence.
+        "report_enabled": settings.get_bool(db, "report_enabled"),
     }
     ctx.update(extra)
     return ctx
@@ -855,10 +858,22 @@ def _period(request: Request) -> tuple[datetime, datetime, str]:
     return start, end, f"{raw_from} → {raw_to}"
 
 
+def _require_report(db: Session) -> None:
+    """404 when the report is switched off in /admin.
+
+    Not 403: the page is not forbidden to this person, it is not there for
+    anybody. Hiding the nav link alone would leave the URL working, and a page
+    you can still reach by typing it is not off — it is only hard to find.
+    """
+    if not settings.get_bool(db, "report_enabled"):
+        raise HTTPException(status_code=404, detail="Not found.")
+
+
 @app.get("/app/{workspace_id}/report", response_class=HTMLResponse)
 async def report_page(request: Request,
                       acc: WorkspaceAccess = Depends(workspace_dep("editor")),
                       db: Session = Depends(get_db)):
+    _require_report(db)
     start, end, label = _period(request)
     return templates.TemplateResponse(request, "report.html", _ctx(
         db, acc, data=report(db, acc.workspace, start, end), label=label,
@@ -870,6 +885,7 @@ async def report_page(request: Request,
 async def report_csv(request: Request,
                      acc: WorkspaceAccess = Depends(workspace_dep("editor")),
                      db: Session = Depends(get_db)):
+    _require_report(db)
     start, end, label = _period(request)
     data = report(db, acc.workspace, start, end)
     buf = io.StringIO()
@@ -1035,12 +1051,28 @@ async def admin_page(request: Request, user: User = Depends(require_admin),
         "user": user, "ws": ensure_workspace(db, user), "role": "owner",
         "is_owner": True, "boards": workspaces_of(db, user), "pending": 0,
         "cfg": settings.smtp_config(db),
+        "report_enabled": settings.get_bool(db, "report_enabled"),
         "has_password": settings.has_password(db),
         "crypto_ok": crypto.available(),
         "securities": settings.SECURITIES,
         "users": users,
         "admins": sum(1 for u in users if u.is_admin and u.is_active),
     })
+
+
+@app.post("/admin/report")
+async def admin_report(request: Request, user: User = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    """Show or hide the report, for everybody at once.
+
+    Still not a level above the boards: this turns a page off, it does not let
+    the admin read one. Nothing about who reaches which list changes here.
+    """
+    form = dict(await request.form())
+    settings.put(db, "report_enabled",
+                 "1" if form.get("report_enabled") in ("1", "on", "true") else "0", user)
+    db.commit()
+    return RedirectResponse("/admin?saved=1", status_code=302)
 
 
 @app.post("/admin/smtp")

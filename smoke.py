@@ -209,6 +209,24 @@ def main_() -> int:
                                                 "version": version + 1})
         check("a partial array is refused", r.status_code == 409)
 
+        print("\n— the report is off until an admin says otherwise —")
+        # Off is the default, and off has to mean gone: hiding the link while the
+        # address still answers is the failure this pair of checks exists for.
+        r = O.get(f"/app/{ws_id}/report?from=2000-01-01&to=2100-01-01")
+        check("off, the report is 404 and not merely unlinked",
+              r.status_code == 404, str(r.status_code))
+        r = O.get(f"/app/{ws_id}/report.csv?from=2000-01-01&to=2100-01-01")
+        check("...and so is its CSV", r.status_code == 404, str(r.status_code))
+        r = O.get(f"/app/{ws_id}")
+        check("...and the tab is not drawn", "/report" not in r.text)
+
+        r = E.post("/admin/report", data={"report_enabled": "1"},
+                   follow_redirects=False)
+        check("a member cannot switch it on", r.status_code == 404, str(r.status_code))
+        r = O.post("/admin/report", data={"report_enabled": "1"},
+                   follow_redirects=False)
+        check("an admin can", r.status_code == 302)
+
         print("\n— the report counts what happened —")
         r = O.get(f"/app/{ws_id}/report?from=2000-01-01&to=2100-01-01")
         check("the report renders", r.status_code == 200)
@@ -216,6 +234,11 @@ def main_() -> int:
         r = O.get(f"/app/{ws_id}/report.csv?from=2000-01-01&to=2100-01-01")
         check("the CSV carries the weights",
               "weights" in r.text and "S=1" in r.text)
+        r = E.get(f"/app/{ws_id}")
+        check("on, the tab is back for a member too", "/report" in r.text)
+
+        # Left ON for the rest of the run, so the checks below that touch the
+        # board keep exercising the page they always exercised.
 
         print("\n— notes are append-only —")
         db = SessionLocal()

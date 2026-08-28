@@ -15,7 +15,7 @@
     {% if ws %}
       <a href="/app/{{ ws.id }}">The list</a>
       <a href="/app/{{ ws.id }}/proposals">Proposals{% if pending %} <span class="dot">{{ pending }}</span>{% endif %}</a>
-      <a href="/app/{{ ws.id }}/report">Report</a>
+      {% if report_enabled %}<a href="/app/{{ ws.id }}/report">Report</a>{% endif %}
       <a href="/app/{{ ws.id }}/settings">Settings</a>
     {% endif %}
     {% if user.is_admin %}<a href="/admin">Admin</a>{% endif %}

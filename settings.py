@@ -1,9 +1,10 @@
 """
 Configuration that lives in the database instead of the environment.
 
-Today that means the SMTP relay, set from /admin after the app is already
-running: the mailbox is not known at deploy time and does not belong in a
-compose file. Same reasoning as borant-id.
+Today that means the SMTP relay and whether the report is shown, both set from
+/admin after the app is already running: the mailbox is not known at deploy time
+and does not belong in a compose file, and whether a page is worth showing is a
+judgement that changes without a redeploy. Same reasoning as borant-id.
 
 **The database is the only source for these, and the environment is not
 consulted at all.** A fallback chain would be the comfortable choice and the
@@ -19,6 +20,11 @@ from crypto import decrypt_or_none, encrypt
 from models import Setting
 
 DEFAULTS = {
+    # Off until somebody turns it on, like the relay below. A report over a
+    # board with no history behind it invites conclusions the data cannot carry,
+    # so the page waits for the months it needs instead of arguing from a week.
+    "report_enabled": "0",
+
     "smtp_enabled": "0",
     "smtp_host": "",
     "smtp_port": "587",

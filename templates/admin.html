@@ -24,6 +24,22 @@
   </p>
 {% endif %}
 
+<h2 class="sec">Report</h2>
+<p class="muted small">
+  Off hides the tab for everybody and makes the page and its CSV return 404 —
+  not just a link removed, or the address would still work for anyone who typed
+  it. Nothing stops being recorded while it is off: the events keep accruing, so
+  turning it on later shows the whole period and not just what came after.
+</p>
+<form method="post" action="/admin/report">
+  <label class="check">
+    <input type="checkbox" name="report_enabled" value="1" {% if report_enabled %}checked{% endif %}>
+    Show the report. Useful once there are months behind it; over a board of a
+    few weeks the percentages move on single completions.
+  </label>
+  <button class="btn" type="submit">Save</button>
+</form>
+
 <h2 class="sec">Mail relay</h2>
 
 {% if not crypto_ok %}
