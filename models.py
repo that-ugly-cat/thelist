@@ -90,6 +90,7 @@ EVENT_TYPES = [
     "created", "proposed", "accepted", "rejected", "edited", "reordered",
     "done", "reopened", "note_added", "deleted", "restored", "purged",
     "member_added", "member_removed", "for_changed", "person_renamed",
+    "person_connected", "person_disconnected",
 ]
 
 # What the report does not count as work on a row, by NAME and deliberately not
@@ -105,7 +106,8 @@ EVENT_TYPES = [
 # there is no task left to snapshot, so it would land in an Unassigned bucket of
 # its own and say nothing about anybody.
 UNCOUNTED_EVENTS = ("created", "purged", "reordered",
-                    "member_added", "member_removed", "person_renamed")
+                    "member_added", "member_removed", "person_renamed",
+                    "person_connected", "person_disconnected")
 
 # Mail this app can send, and whether it is on unless somebody turns it off
 # (SPEC.md §7). Notes are off because with two people a mail per note means
@@ -698,6 +700,26 @@ def people_of(db, ws: Workspace, include_archived: bool = False) -> list:
     if not include_archived:
         q = q.filter(Person.archived_at.is_(None))
     return q.order_by(Person.is_owner_self.desc(), Person.norm_name).all()
+
+
+def connectable_users(db, ws: Workspace) -> list:
+    """Accounts a person row can be pointed at, by hand, from settings.
+
+    The editors of this board and nobody else. Not every account on the server:
+    the link exists so that the work somebody asks for and the proposals they
+    file read as one human, and only a member can file one. A dropdown of
+    strangers would be a directory of everyone who ever signed up.
+
+    The owner is left out. They already have their own row, and a second one
+    carrying their account would be found by person_for_proposal() ahead of it.
+    """
+    taken = {p.user_id for p in
+             db.query(Person).filter(Person.workspace_id == ws.id,
+                                     Person.user_id.isnot(None)).all()}
+    out = [m.user for m in
+           db.query(Membership).filter(Membership.workspace_id == ws.id).all()
+           if m.user_id != ws.owner_user_id and m.user_id not in taken]
+    return sorted(out, key=lambda u: (u.label or "").lower())
 
 
 # ── helpers: tags ─────────────────────────────────────────────────────────────

@@ -490,6 +490,67 @@ def main_() -> int:
                    follow_redirects=False)
         check("an editor cannot rename people", r.status_code == 404)
 
+        print("\n— a person and an account are the same human —")
+        from models import Person
+        db = SessionLocal()
+        hand = Person(workspace_id=ws_id, display_name="Nik", norm_name="nik")
+        db.add(hand)
+        db.commit()
+        hand_id = hand.id
+        ed_id = db.query(User).filter(User.email == "editor@example.org").first().id
+        str_id = db.query(User).filter(User.email == "stranger@example.org").first().id
+        # The editor's proposal earlier landed on the row spelled exactly like
+        # their account, and linked it on the way past. That is the only case
+        # that resolves itself, and it is why the button has to exist for
+        # every other spelling.
+        auto = db.query(Person).filter(Person.workspace_id == ws_id,
+                                       Person.norm_name == "nikola").first()
+        auto_id = auto.id
+        check("a matching name links itself", auto.user_id == ed_id)
+        db.close()
+
+        r = E.post(f"/app/{ws_id}/people/{hand_id}/connect",
+                   data={"user_id": ed_id}, follow_redirects=False)
+        check("an editor cannot connect an account", r.status_code == 404)
+        r = O.post(f"/app/{ws_id}/people/{hand_id}/connect",
+                   data={"user_id": str_id}, follow_redirects=False)
+        check("someone who cannot see the list is not offered", r.status_code == 400)
+        r = O.post(f"/app/{ws_id}/people/{hand_id}/connect",
+                   data={"user_id": owner_id}, follow_redirects=False)
+        check("the owner's own account is not on offer", r.status_code == 400)
+        r = O.post(f"/app/{ws_id}/people/1/connect",
+                   data={"user_id": ed_id}, follow_redirects=False)
+        check("the owner's own row cannot be repointed", r.status_code == 400)
+        r = O.post(f"/app/{ws_id}/people/{hand_id}/connect",
+                   data={"user_id": ed_id}, follow_redirects=False)
+        check("one account cannot be two people", r.status_code == 400)
+
+        r = O.post(f"/app/{ws_id}/people/{auto_id}/disconnect", follow_redirects=False)
+        check("the owner can disconnect", r.status_code == 302)
+        r = O.post(f"/app/{ws_id}/people/{hand_id}/connect",
+                   data={"user_id": ed_id}, follow_redirects=False)
+        check("...and then connect the same account elsewhere", r.status_code == 302)
+
+        E.post(f"/app/{ws_id}/tasks", data={"title": "Second proposal",
+                                            "effort": "S"},
+               follow_redirects=False)
+        db = SessionLocal()
+        prop = db.query(Task).filter(Task.title == "Second proposal").first()
+        check("a proposal follows the link and not the spelling",
+              prop.person.id == hand_id, str(prop.person.display_name))
+        check("...so no third row is invented",
+              db.query(Person).filter(Person.workspace_id == ws_id).count() == 3,
+              str(db.query(Person).filter(Person.workspace_id == ws_id).count()))
+        db.close()
+
+        # Put the board back the way the rest of this run expects to find it:
+        # the account belongs to the row spelled like it, and "Nik" goes back to
+        # being somebody without an account.
+        O.post(f"/app/{ws_id}/people/{hand_id}/disconnect", follow_redirects=False)
+        r = O.post(f"/app/{ws_id}/people/{auto_id}/connect",
+                   data={"user_id": ed_id}, follow_redirects=False)
+        check("the link can be moved back", r.status_code == 302)
+
         print("\n— a task points at more than one thing —")
         from models import Link, migrate_links
         db = SessionLocal()

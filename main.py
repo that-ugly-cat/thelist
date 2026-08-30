@@ -52,7 +52,7 @@ from models import (
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
     normalise, people_of, person_for_proposal, reopen, report, role_for,
-    self_person, set_tags, tags_of, utcnow, workspaces_of,
+    connectable_users, self_person, set_tags, tags_of, utcnow, workspaces_of,
 )
 
 log = logging.getLogger("thelist")
@@ -982,7 +982,7 @@ async def settings_page(request: Request,
                                     ApiKey.revoked_at.is_(None)).all())
     return templates.TemplateResponse(request, "settings.html", _ctx(
         db, acc, members=members, people=people_of(db, ws, include_archived=True),
-        prefs=prefs, keys=keys,
+        link_candidates=connectable_users(db, ws), prefs=prefs, keys=keys,
         invites=db.query(Invitation).filter(Invitation.workspace_id == ws.id,
                                             Invitation.accepted_at.is_(None)).all(),
         smtp_on=settings.get_bool(db, "smtp_enabled")))
@@ -1053,6 +1053,64 @@ async def edit_person(person_id: int, display_name: str = Form(""),
     if not p.is_owner_self:
         p.archived_at = utcnow() if archived in ("1", "on", "true") else None
     db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}/settings", status_code=302)
+
+
+@app.post("/app/{workspace_id}/people/{person_id}/connect")
+async def connect_person(person_id: int, user_id: int = Form(...),
+                         acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                         db: Session = Depends(get_db)):
+    """Point a person at the account that is the same human.
+
+    The bridge was in the schema from the start and nothing ever wrote to it, so
+    a row typed by hand stayed accountless for good. That is not cosmetic: until
+    the link exists, person_for_proposal() cannot recognise the proposer and
+    falls back to matching on the account label, which makes a second row the
+    moment the two spellings differ — a board with Nikola and Nikola
+    Biller-Andorno on it, and the count split between them.
+    """
+    p = (db.query(Person).filter(Person.id == person_id,
+                                 Person.workspace_id == acc.workspace.id).first())
+    if p is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    if p.is_owner_self:
+        raise HTTPException(status_code=400, detail="That row is already your own account.")
+    member = (db.query(Membership)
+                .filter(Membership.workspace_id == acc.workspace.id,
+                        Membership.user_id == user_id).first())
+    if member is None or user_id == acc.workspace.owner_user_id:
+        raise HTTPException(status_code=400, detail="That account cannot be connected here.")
+    taken = (db.query(Person)
+               .filter(Person.workspace_id == acc.workspace.id,
+                       Person.user_id == user_id, Person.id != p.id).first())
+    if taken is not None:
+        raise HTTPException(status_code=400,
+                            detail=f"That account is already connected to {taken.display_name}.")
+    p.user_id = user_id
+    log_event(db, acc.workspace.id, "person_connected", actor=acc.user,
+              person=p.display_name, account=member.user.label)
+    db.commit()
+    return RedirectResponse(f"/app/{acc.workspace.id}/settings", status_code=302)
+
+
+@app.post("/app/{workspace_id}/people/{person_id}/disconnect")
+async def disconnect_person(person_id: int,
+                            acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                            db: Session = Depends(get_db)):
+    """Undo the link. The tasks stay where they are — this only stops the row
+    and the account being read as one person."""
+    p = (db.query(Person).filter(Person.id == person_id,
+                                 Person.workspace_id == acc.workspace.id).first())
+    if p is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    if p.is_owner_self:
+        raise HTTPException(status_code=400, detail="Your own row keeps your account.")
+    if p.user_id is not None:
+        was = db.query(User).get(p.user_id)
+        p.user_id = None
+        log_event(db, acc.workspace.id, "person_disconnected", actor=acc.user,
+                  person=p.display_name, account=was.label if was else "")
+        db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}/settings", status_code=302)
 
 

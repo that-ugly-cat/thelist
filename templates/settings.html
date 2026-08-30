@@ -28,6 +28,11 @@
   Who tasks are for. They can be anyone — an account is not needed. Archiving one
   keeps every past task pointing at them, it only takes them out of the menu.
 </p>
+<p class="muted small">
+  Someone who is also on this list can be connected to their account. Then a task
+  you write for them and a task they propose land on the same row instead of two.
+  Only the people who can see this list are offered.
+</p>
 <table class="plain">
   {% for p in people %}
   <tr class="{% if p.archived_at %}dim{% endif %}">
@@ -46,7 +51,29 @@
       {% endif %}
     </td>
     <td class="muted small">
-      {% if p.is_owner_self %}you{% elif p.user %}has an account{% else %}no account{% endif %}
+      {% if p.is_owner_self %}
+        you
+      {% elif p.user %}
+        {{ p.user.label }}
+        {% if is_owner %}
+        <form method="post" action="/app/{{ ws.id }}/people/{{ p.id }}/disconnect" class="inline"
+              onsubmit="return confirm('Disconnect them? The tasks stay where they are.')">
+          <button class="mini">disconnect</button>
+        </form>
+        {% endif %}
+      {% elif is_owner and link_candidates %}
+        no account
+        <form method="post" action="/app/{{ ws.id }}/people/{{ p.id }}/connect" class="inline">
+          <select name="user_id">
+            {% for u in link_candidates %}
+              <option value="{{ u.id }}">{{ u.label }}</option>
+            {% endfor %}
+          </select>
+          <button class="mini">connect</button>
+        </form>
+      {% else %}
+        no account
+      {% endif %}
     </td>
   </tr>
   {% endfor %}
