@@ -31,7 +31,8 @@
 <p class="muted small">
   Someone who is also on this list can be connected to their account. Then a task
   you write for them and a task they propose land on the same row instead of two.
-  Only the people who can see this list are offered.
+  Only the people who can see this list are offered{% if is_owner and not link_candidates %} — and right now
+  that is nobody but you, so there is no account here to connect anyone to{% endif %}.
 </p>
 <table class="plain">
   {% for p in people %}
