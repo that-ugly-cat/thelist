@@ -48,7 +48,7 @@ from models import (
     SessionLocal, Task, Tag, User, Workspace,
     active_tasks, add_contact, add_link, apply_order, archived_tasks,
     earmarked_ids, mark_seen, moods_of, purge_task, set_mood, unseen_touches,
-    toggle_earmark, ensure_one_admin, ensure_workspace,
+    toggle_earmark, set_waiting, ensure_one_admin, ensure_workspace,
     get_or_create_person, get_db, migrate_links,
     init_db, log_event, mark_done, new_api_key, new_invite_token, next_position,
     normalise, people_of, person_for_proposal, reopen, report, role_for,
@@ -445,7 +445,7 @@ def _ctx(db: Session, acc: WorkspaceAccess, **extra) -> dict:
 
 @app.get("/app/{workspace_id}", response_class=HTMLResponse)
 async def board(request: Request, view: str = "list", tag: str = "", person: str = "",
-                archive: int = 0,
+                waiting: str = "", archive: int = 0,
                 acc: WorkspaceAccess = Depends(workspace_dep("editor")),
                 db: Session = Depends(get_db)):
     ws = acc.workspace
@@ -472,6 +472,11 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
         except ValueError:
             pass
 
+    if waiting == "them":
+        rows = [t for t in rows if t.waiting_them]
+    elif waiting == "me":
+        rows = [t for t in rows if not t.waiting_them]
+
     marked = earmarked_ids(db, ws, acc.user)
     if request.query_params.get("marked"):
         rows = [t for t in rows if t.id in marked]
@@ -483,7 +488,8 @@ async def board(request: Request, view: str = "list", tag: str = "", person: str
         rows = sorted([t for t in rows if t.due_date], key=lambda t: t.due_date)
 
     return templates.TemplateResponse(request, "board.html", _ctx(
-        db, acc, tasks=rows, view=view, tag=tag, person=person, archive=archive,
+        db, acc, tasks=rows, view=view, tag=tag, person=person, waiting=waiting,
+        archive=archive,
         people=people_of(db, ws), tags=tags_of(db, ws), self_id=self_person(db, ws).id,
         marked=marked, moods=moods_of(db, ws, acc.user), note_counts=note_counts,
         unseen=unseen_touches(db, ws, acc.user),
@@ -749,6 +755,29 @@ async def delete_task_contact(contact_id: int,
     db.delete(c)
     db.commit()
     return RedirectResponse(f"/app/{acc.workspace.id}#task-{task_id}", status_code=302)
+
+
+@app.post("/app/{workspace_id}/tasks/{task_id}/waiting")
+async def waiting_toggle(task_id: int, acc: WorkspaceAccess = Depends(workspace_dep("owner")),
+                         db: Session = Depends(get_db)):
+    """Move the ball, on or off. **Owner only, and it does go in the event log.**
+
+    Owner only because the board is the owner's declared state of the world, the
+    same reason the dragged order is: an editor who could set this would be
+    writing state on somebody else's list without passing through them, which is
+    what `proposed` exists to avoid. The editor sees it and says "answered you"
+    in a note.
+
+    Logged because this is shared state and not a private mark -- see
+    `set_waiting`. It stays out of the report only because both event types are
+    named in UNCOUNTED_EVENTS.
+    """
+    t = _visible_task(db, acc, task_id)
+    on = set_waiting(db, t, not t.waiting_them)
+    log_event(db, acc.workspace.id, "waiting_on" if on else "waiting_off",
+              actor=acc.user, task=t)
+    db.commit()
+    return {"on": on}
 
 
 @app.post("/app/{workspace_id}/tasks/{task_id}/earmark")

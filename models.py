@@ -91,6 +91,7 @@ EVENT_TYPES = [
     "done", "reopened", "note_added", "deleted", "restored", "purged",
     "member_added", "member_removed", "for_changed", "person_renamed",
     "person_connected", "person_disconnected",
+    "waiting_on", "waiting_off",
 ]
 
 # What the report does not count as work on a row, by NAME and deliberately not
@@ -107,7 +108,12 @@ EVENT_TYPES = [
 # its own and say nothing about anybody.
 UNCOUNTED_EVENTS = ("created", "purged", "reordered",
                     "member_added", "member_removed", "person_renamed",
-                    "person_connected", "person_disconnected")
+                    "person_connected", "person_disconnected",
+                    # Moving the ball is a statement about the state of the
+                    # world, not work on the row. Counted, a flag flipped out
+                    # and back would read as two touches, and the cheapest way
+                    # to look busy on this board would be to toggle an arrow.
+                    "waiting_on", "waiting_off")
 
 # Mail this app can send, and whether it is on unless somebody turns it off
 # (SPEC.md §7). Notes are off because with two people a mail per note means
@@ -239,6 +245,23 @@ class Task(Base):
     recurring = Column(Boolean, default=False, nullable=False)
     effort = Column(String, default=DEFAULT_EFFORT, nullable=False)
     due_date = Column(Date, nullable=True)
+
+    # Whose move it is, and nothing more. A boolean rather than a person column
+    # because the people you wait on are mostly NOT in `people` -- Frank Ursin,
+    # Ferrario, Holger are contacts on the row -- and putting them there to fill
+    # this in would dirty the identity table for the sake of a filter, which is
+    # the objection that already killed the person-tag. The who is in `contacts`
+    # with its `reason`; this is only the direction.
+    #
+    # It is also NOT `assignee_user_id` revived: one visible person column at a
+    # time. A flag crosses that axis instead of competing with it -- a row can
+    # be `for` Nikola while the ball sits with Spit, and about a third of the
+    # list is like that.
+    #
+    # Owner-only, deliberately undated: the age of the wait is recoverable from
+    # the event log if it is ever wanted, and is kept off the row so the
+    # indicator stays a glance and not a reading.
+    waiting_them = Column(Boolean, default=False, nullable=False)
 
     position = Column(Integer, default=0, nullable=False)
     for_person_id = Column(Integer, ForeignKey("people.id"), nullable=True)
@@ -1004,8 +1027,28 @@ def report(db, ws: Workspace, start: datetime, end: datetime) -> dict:
 # Additive columns added after the first deploy go here, in the house form:
 # every startup tries them, SQLite refuses the duplicates, we ignore the refusal.
 _MIGRATIONS = [
-    # ("tasks", "some_new_column TEXT DEFAULT ''"),
+    ("tasks", "waiting_them BOOLEAN DEFAULT 0 NOT NULL"),
 ]
+
+
+def set_waiting(db, task: Task, on: bool) -> bool:
+    """Move the ball. Returns the state it ended in.
+
+    Shared by the web and the MCP surface on purpose: two implementations of
+    what a state change means are one too many, and the second is always the one
+    that drifts.
+
+    Unlike the earmark and the mood, this one DOES reach the event log. Those
+    two are private, per-person and uncounted, so an event would turn a cheap
+    mark into a commitment. This is neither private nor per-person: it is board
+    state the owner declares, in the same family as `status` and `for_person`,
+    It still never becomes a touch, but that is not automatic: the report
+    counts every event NOT in UNCOUNTED_EVENTS, so both types are listed there
+    by name. Without that, flipping the arrow out and back would read as two
+    touches.
+    """
+    task.waiting_them = bool(on)
+    return task.waiting_them
 
 
 def migrate_links(db) -> int:

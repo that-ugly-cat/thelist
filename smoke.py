@@ -314,6 +314,58 @@ def main_() -> int:
         check("a face is not a touch", before_t == after_t, str(after_t))
         check("...and writes no event at all", n_ev == 0, str(n_ev))
 
+        print("\n— the ball: whose move it is —")
+        r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+        check("the owner can hand the ball on", r.json()["on"] is True, str(r.json()))
+        r = O.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+        check("...and take it back", r.json()["on"] is False)
+
+        # Owner only. The editor sees it and cannot move it: this is board state
+        # the owner declares, like the dragged order.
+        r = E.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+        check("an editor cannot move the ball", r.status_code in (403, 404), str(r.status_code))
+        db = SessionLocal()
+        still = db.query(Task).get(ids[0]).waiting_them
+        db.close()
+        check("...and the flag did not move", still is False, str(still))
+
+        # The failure this one is here to prevent: a flag flipped out and back
+        # reading as two touches, which would make toggling an arrow the cheapest
+        # way to look busy.
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        before_b = {x["label"]: x["touches"] for x in
+                    report_(db, ws_, dt(2000, 1, 1), dt(2100, 1, 1))["people"]}
+        db.close()
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+        db = SessionLocal()
+        ws_ = db.query(Workspace).get(ws_id)
+        after_b = {x["label"]: x["touches"] for x in
+                   report_(db, ws_, dt(2000, 1, 1), dt(2100, 1, 1))["people"]}
+        n_wait = db.query(Event).filter(Event.type.like("waiting%")).count()
+        db.close()
+        check("moving the ball is not a touch", before_b == after_b, str(after_b))
+        check("...but it does leave events, unlike the earmark", n_wait >= 2, str(n_wait))
+
+        # The filter is a reading of the same table.
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+        r = O.get(f"/app/{ws_id}?waiting=them")
+        check("the theirs filter keeps the waiting row", f'id="task-{ids[0]}"' in r.text)
+        check("...and drops the rest", f'id="task-{ids[1]}"' not in r.text)
+        r = O.get(f"/app/{ws_id}?waiting=me")
+        check("the mine filter is its complement",
+              f'id="task-{ids[0]}"' not in r.text and f'id="task-{ids[1]}"' in r.text)
+        check("dragging is off under the ball filter", 'data-sortable="0"' in r.text)
+        r = O.get(f"/app/{ws_id}")
+        check("...and back on with no filter", 'data-sortable="1"' in r.text)
+
+        # An editor reads the arrow but gets no button to press.
+        r = E.get(f"/app/{ws_id}")
+        check("an editor sees the arrow", "→" in r.text)
+        check("...without a control", "data-ball=" not in r.text)
+        O.post(f"/app/{ws_id}/tasks/{ids[0]}/waiting")
+
         # Per person, exactly like the earmark.
         E.post(f"/app/{ws_id}/tasks/{ids[0]}/mood", data={"value": "1"})
         db = SessionLocal()

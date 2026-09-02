@@ -35,7 +35,7 @@ from models import (
     DEFAULT_EFFORT, EFFORTS, EFFORT_WEIGHTS, STATUS_LABELS, Contact, Link,
     Membership,
     Note, SessionLocal, Task, User, Workspace, active_tasks, add_contact, add_link,
-    get_or_create_person, has_role, log_event, mark_done, next_position,
+    get_or_create_person, has_role, log_event, mark_done, next_position, set_waiting,
     people_of, person_for_proposal, reopen, report, role_for, self_person,
     set_tags, tags_of, utcnow, workspaces_of,
 )
@@ -144,6 +144,7 @@ def _brief(db, t: Task) -> dict:
         "recurring": bool(t.recurring),
         "due": t.due_date.isoformat() if t.due_date else None,
         "overdue": bool(t.due_date and t.due_date < date.today()),
+        "ball": "them" if t.waiting_them else "me",
         "last_done": t.last_done_at.date().isoformat() if t.last_done_at else None,
         "notes": db.query(Note).filter(Note.task_id == t.id,
                                        Note.deleted_at.is_(None)).count(),
@@ -174,12 +175,20 @@ def list_boards() -> dict:
 
 @mcp.tool()
 def list_tasks(board: str = "", status: str = "active", tag: str = "",
-               for_person: str = "", include_archived: bool = False) -> dict:
+               for_person: str = "", ball: str = "",
+               include_archived: bool = False) -> dict:
     """What is on a board, in the order the owner put it.
 
     `status` is one of active, proposed, done, rejected. The order of the result
     IS the priority the owner declared by dragging: do not re-sort it before
     reporting it.
+
+    `ball` filters by whose move it is: "me" for what the owner can act on now,
+    "them" for what is waiting on somebody else. It is a different axis from
+    `for_person` and they cross -- a task can be *for* Nikola with the ball on
+    the owner, and about a third of a real list is like that -- so do not read
+    one off the other. The waiting flag is undated by design: it says the ball
+    is out, never for how long, and a stale one is possible.
     """
     db = SessionLocal()
     try:
@@ -203,6 +212,11 @@ def list_tasks(board: str = "", status: str = "active", tag: str = "",
             fp = for_person.strip().lower()
             rows = [t for t in rows
                     if t.person and t.person.norm_name == fp]
+        if ball.strip():
+            b = ball.strip().lower()
+            if b not in ("me", "them"):
+                return _fail('ball must be "me" or "them"')
+            rows = [t for t in rows if bool(t.waiting_them) == (b == "them")]
         return {"board": ws.name, "status": status,
                 "tasks": [_brief(db, t) for t in rows]}
     finally:
@@ -459,7 +473,7 @@ def add_task(title: str, board: str = "", for_person: str = "", tags: str = "",
 def update_task(task_id: int, board: str = "", title: str = "",
                 for_person: str = "", tags: str = "", effort: str = "",
                 due: str = "", description: str = "",
-                recurring: str = "", clear: str = "") -> dict:
+                recurring: str = "", ball: str = "", clear: str = "") -> dict:
     """Change a task. Owner only.
 
     Empty means "leave it alone", so a call only touches what it names. To empty
@@ -469,6 +483,10 @@ def update_task(task_id: int, board: str = "", title: str = "",
 
     `recurring` takes "yes" or "no". `tags` REPLACES the whole set rather than
     adding to it: read the task first if you mean to append.
+
+    `ball` takes "me" or "them" and moves whose court the task sits in. Setting
+    it is a claim about the state of the world that somebody will read, so say
+    what you are doing before you do it, the same as any other write here.
     """
     db = SessionLocal()
     try:
@@ -498,6 +516,14 @@ def update_task(task_id: int, board: str = "", title: str = "",
             if r not in ("yes", "no", "true", "false"):
                 return _fail('recurring takes "yes" or "no"')
             t.recurring = r in ("yes", "true")
+        if ball.strip():
+            b = ball.strip().lower()
+            if b not in ("me", "them"):
+                return _fail('ball must be "me" or "them"')
+            if bool(t.waiting_them) != (b == "them"):
+                set_waiting(db, t, b == "them")
+                log_event(db, ws.id, "waiting_on" if b == "them" else "waiting_off",
+                          actor=user, task=t)
         if due.strip():
             try:
                 t.due_date = date.fromisoformat(due.strip())

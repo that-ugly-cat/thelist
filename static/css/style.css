@@ -354,6 +354,20 @@ dialog.bigeditor textarea { font-size: 15px; line-height: 1.55; }
 .earmark:hover { color: var(--warn); transform: scale(1.25); }
 .earmark.on { color: var(--warn); }
 
+/* ── the ball: whose move it is ── */
+/* Deliberately not red and not amber: overdue owns the alarm colours, and a
+   second alarm makes the first one stop meaning anything. This reads by
+   DIRECTION -- an arrow pointing away is out of your hands -- and only earns
+   ink once it points away. */
+.ball {
+  background: none; border: none; cursor: pointer; padding: 0 2px;
+  font-size: 12px; line-height: 1.5; color: var(--muted-3);
+  transition: color .12s ease, transform .12s ease;
+}
+.ball:hover { color: var(--text); transform: scale(1.2); }
+.ball.on { color: var(--accent); font-weight: 600; }
+span.ball { cursor: default; }
+
 /* ── the three faces: same private, uncounted thing about a different question ── */
 /* The actions column becomes a column so these can sit under the buttons at the
    bottom right, which is where a thing you answer last belongs. */

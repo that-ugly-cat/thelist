@@ -23,20 +23,30 @@
   <a href="/app/{{ ws.id }}{% if only_marked %}{% else %}?marked=1{% endif %}"
      class="pill mark {% if only_marked %}on{% endif %}"
      title="Only what you earmarked">● earmarked</a>
+  {# Whose move it is. Three positions and no "unset": a row nobody has touched
+     is yours, which is the safe default -- it over-reports your own load and
+     never hides it. #}
+  <span class="lbl">Ball</span>
+  <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+     class="pill {% if not waiting %}on{% endif %}">both</a>
+  <a href="/app/{{ ws.id }}?waiting=me&view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+     class="pill {% if waiting == 'me' %}on{% endif %}" title="Mine to move">← mine</a>
+  <a href="/app/{{ ws.id }}?waiting=them&view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+     class="pill {% if waiting == 'them' %}on{% endif %}" title="Waiting on somebody else">→ theirs</a>
   <span class="lbl">For</span>
-  <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+  <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}{% if waiting %}&waiting={{ waiting }}{% endif %}"
      class="pill {% if not person %}on{% endif %}">everyone</a>
   {% for p in people %}
     <a class="pill {% if person == p.id|string %}on{% endif %}"
-       href="/app/{{ ws.id }}?person={{ p.id }}&view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}">{{ p.display_name }}</a>
+       href="/app/{{ ws.id }}?person={{ p.id }}&view={{ view }}{% if archive %}&archive=1{% endif %}{% if tag %}&tag={{ tag }}{% endif %}{% if waiting %}&waiting={{ waiting }}{% endif %}">{{ p.display_name }}</a>
   {% endfor %}
   {% if tags %}
     <span class="lbl">Tag</span>
-    <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}"
+    <a href="/app/{{ ws.id }}?view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}{% if waiting %}&waiting={{ waiting }}{% endif %}"
        class="pill {% if not tag %}on{% endif %}">all</a>
     {% for t in tags %}
       <a class="pill {% if tag == t.name %}on{% endif %}"
-         href="/app/{{ ws.id }}?tag={{ t.name }}&view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}">{{ t.display_name }}</a>
+         href="/app/{{ ws.id }}?tag={{ t.name }}&view={{ view }}{% if archive %}&archive=1{% endif %}{% if person %}&person={{ person }}{% endif %}{% if waiting %}&waiting={{ waiting }}{% endif %}">{{ t.display_name }}</a>
     {% endfor %}
   {% endif %}
 </div>
@@ -52,7 +62,7 @@
     <p class="empty">{% if archive %}Nothing archived yet.{% else %}Nothing on the list.{% endif %}</p>
   {% endif %}
 
-  {% set sortable = view == 'list' and not archive and not tag and not person %}
+  {% set sortable = view == 'list' and not archive and not tag and not person and not waiting %}
   <ul class="tasks" id="tasks" data-ws="{{ ws.id }}" data-version="{{ ws.order_version }}"
       data-sortable="{{ 1 if sortable else 0 }}">
     {% for t in tasks %}
@@ -69,6 +79,17 @@
       <button class="earmark {% if t.id in marked %}on{% endif %}" type="button"
               data-earmark="/app/{{ ws.id }}/tasks/{{ t.id }}/earmark"
               title="Earmark — only you see this" aria-pressed="{{ 'true' if t.id in marked else 'false' }}">●</button>
+
+      {# Direction, not colour: red already means overdue, and two reds mean
+         neither. Owner-only to press; an editor sees the arrow and reads it. #}
+      {% if is_owner %}
+      <button class="ball {% if t.waiting_them %}on{% endif %}" type="button"
+              data-ball="/app/{{ ws.id }}/tasks/{{ t.id }}/waiting"
+              title="{% if t.waiting_them %}Waiting on somebody else — click when the ball comes back{% else %}Yours to move — click when you have handed it on{% endif %}"
+              aria-pressed="{{ 'true' if t.waiting_them else 'false' }}">{{ '→' if t.waiting_them else '←' }}</button>
+      {% elif t.waiting_them %}
+      <span class="ball on" title="Waiting on somebody else">→</span>
+      {% endif %}
 
       <div class="body">
         {# Everything that identifies the row sits on the title line: what it

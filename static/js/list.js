@@ -416,6 +416,21 @@
         });
       return;
     }
+    const ball = e.target.closest("[data-ball]");
+    if (ball) {
+      e.preventDefault();
+      fetch(ball.dataset.ball, { method: "POST" })
+        .then((r) => r.json())
+        .then((d) => {
+          ball.classList.toggle("on", d.on);
+          ball.setAttribute("aria-pressed", String(d.on));
+          ball.textContent = d.on ? "→" : "←";
+          ball.title = d.on
+            ? "Waiting on somebody else — click when the ball comes back"
+            : "Yours to move — click when you have handed it on";
+        });
+      return;
+    }
     const face = e.target.closest("[data-mood]");
     if (face) {
       e.preventDefault();
